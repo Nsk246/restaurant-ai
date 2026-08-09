@@ -103,6 +103,7 @@ class MediaBridge:
         dispatch_tool: Callable[[str, dict], Awaitable[dict]] | None = None,
         tool_timeout_ms: int = 1200,
         connect_timeout_s: float = 10.0,
+        greeting: str | None = None,
     ):
         self.ws = ws
         self.provider = provider
@@ -113,6 +114,10 @@ class MediaBridge:
         self.dispatch_tool = dispatch_tool
         self.tool_timeout_ms = tool_timeout_ms
         self.connect_timeout_s = connect_timeout_s
+        # On an inbound call the agent speaks first. Without this both sides
+        # wait for the other and the caller hears dead air, which reads as a
+        # broken line rather than a silent agent.
+        self.greeting = greeting
         self.tool_calls: list[dict] = []
         self._tool_tasks: set[asyncio.Task] = set()
 
@@ -205,6 +210,12 @@ class MediaBridge:
                 self.stream_sid = msg["start"]["streamSid"]
                 self._started_at = time.monotonic()
                 await self._emit({"type": "status", "status": "live"})
+                if self.greeting:
+                    # The caller has just been connected. Nudge the model to
+                    # open, rather than waiting for a caller who is waiting
+                    # for it.
+                    self._turn.caller_stopped_at = time.time()
+                    await self.provider.send_text(self.greeting)
 
             elif event == "media":
                 payload = base64.b64decode(msg["media"]["payload"])

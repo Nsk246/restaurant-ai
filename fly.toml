@@ -1,51 +1,45 @@
-# Fly config for the voice service.
+# fly.toml app configuration file generated for restaurant-ai-voice on 2026-08-09T04:46:32Z
 #
-# Two settings here are not defaults and both matter:
-#   auto_stop_machines = false  - a cold start mid-demo is a lost deal
-#   min_machines_running = 1    - keeps the WebSocket endpoint warm
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
-# Region iad is Ashburn, which is also Twilio's default US edge. Keeping them
-# co-located is worth roughly 40ms of the latency budget.
 
-app = "restaurant-ai-voice"
-primary_region = "iad"
+app = 'restaurant-ai-voice'
+primary_region = 'iad'
 
 [build]
-  dockerfile = "services/voice/Dockerfile"
+  dockerfile = 'services/voice/Dockerfile'
 
-# Migrations run before the new version takes traffic. Fly aborts the release
-# if this fails, so a broken migration never reaches a live phone line.
 [deploy]
-  release_command = "bash db/release.sh"
+  release_command = 'bash db/release.sh'
 
 [env]
-  APP_ENV = "prod"
-  PORT = "8000"
-  REALTIME_PROVIDER = "gemini"
-  DEMO_MODE = "true"
-  # Overwrite if you name the app something else.
-  PUBLIC_BASE_URL = "restaurant-ai-voice.fly.dev"
+  APP_ENV = 'prod'
+  DEMO_MODE = 'true'
+  PORT = '8000'
+  PUBLIC_BASE_URL = 'restaurant-ai-voice.fly.dev'
+  REALTIME_PROVIDER = 'gemini'
 
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = 'off'
   auto_start_machines = true
   min_machines_running = 1
 
   [http_service.concurrency]
-    type = "connections"
+    type = 'connections'
     hard_limit = 50
     soft_limit = 40
 
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "1gb"
+[checks]
+  [checks.health]
+    port = 8000
+    type = 'http'
+    interval = '15s'
+    timeout = '3s'
+    grace_period = '10s'
+    path = '/health'
 
-[checks.health]
-  type = "http"
-  port = 8000
-  path = "/health"
-  interval = "15s"
-  timeout = "3s"
-  grace_period = "10s"
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '1gb'

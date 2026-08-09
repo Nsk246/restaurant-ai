@@ -233,6 +233,12 @@ async def twilio_stream(ws: WebSocket, call_id: str):
         max_call_seconds=settings.max_call_seconds,
         dispatch_tool=dispatcher.dispatch if dispatcher else None,
         tool_timeout_ms=settings.tool_timeout_ms,
+        greeting=(
+            f"(The call has just connected. Greet the caller now, in one short "
+            f"sentence, as {tenant.name}.)"
+            if tenant is not None
+            else None
+        ),
     )
 
     summary, err = {}, None

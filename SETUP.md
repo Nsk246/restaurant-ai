@@ -198,6 +198,13 @@ by `setup.sh`. On a container created before that change:
 the API tests call `/api/demo/reset` and pointing them at the development
 database destroyed whatever was on the rail.
 
+**The call connects but nobody speaks.** On an inbound call the agent has to
+open, or both sides wait for the other. The bridge now nudges it to greet on
+the Twilio `start` event. If it is still silent, run the probe below: it tests
+the model on its own, so a failure comes with a message instead of dead air.
+
+    cd services/voice && python tools/probe_gemini.py
+
 **Gemini session fails to open.** Model ids churn on the developer tier. The
 error names the model it tried; check the current list at
 https://ai.google.dev/gemini-api/docs/models and set `GEMINI_LIVE_MODEL`.

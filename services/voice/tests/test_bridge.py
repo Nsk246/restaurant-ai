@@ -336,3 +336,27 @@ async def test_a_failing_provider_connect_is_reported():
     await asyncio.wait_for(bridge.run(), timeout=5)
 
     assert any("model not found" in str(e.get("detail", "")) for e in seen), seen
+
+
+@pytest.mark.asyncio
+async def test_the_agent_is_nudged_to_speak_first_on_an_inbound_call():
+    """Without this both sides wait for the other and the caller hears dead
+    air, which sounds like a broken line rather than a silent agent."""
+    ws = FakeTwilioWS(
+        [start_msg()] + [media_msg(quiet()) for _ in range(5)]
+        + [json.dumps({"event": "stop"})]
+    )
+    provider = MockProvider()
+    bridge = MediaBridge(ws, provider, greeting="(greet the caller now)")
+    await asyncio.wait_for(bridge.run(), timeout=5)
+
+    assert provider.sent_text == ["(greet the caller now)"]
+
+
+@pytest.mark.asyncio
+async def test_no_greeting_means_no_nudge():
+    ws = FakeTwilioWS([start_msg(), json.dumps({"event": "stop"})])
+    provider = MockProvider()
+    bridge = MediaBridge(ws, provider)
+    await asyncio.wait_for(bridge.run(), timeout=5)
+    assert provider.sent_text == []
