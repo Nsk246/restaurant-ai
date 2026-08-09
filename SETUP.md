@@ -99,11 +99,13 @@ thought.
 `<Start><Stream>` instead of `<Connect><Stream>`. `<Start>` is listen-only.
 There is a test for this.
 
-**Codespace stuck on "Setting up your codespace".** Fixed in the devcontainer
-as of this version. The cause was `setup.sh` waiting on `pg_isready` in a base
-image that has no Postgres client: a missing command returns non-zero exactly
-like a database that is not ready, so the loop never exited. Every wait in
-setup.sh is now bounded and fails with a readable error instead of hanging.
+**Codespace stuck at "Retrieving" or "Setting up your codespace".** Fixed. The
+devcontainer previously used a docker-compose stack plus three features, which
+forced Codespaces to build a container on every create. It is now a single
+prebuilt Python image with Postgres and Redis apt-installed by setup.sh, which
+builds in well under a minute. If you still have a stuck Codespace, delete it
+rather than rebuilding: half-created containers carry their broken state
+forward.
 
 **Twilio 31920.** The WebSocket upgrade was rejected. Deploy to Fly and repoint.
 

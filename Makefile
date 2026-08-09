@@ -1,4 +1,4 @@
-DB ?= postgresql://operator:operator@localhost:5432/operator
+DB ?= postgresql://operator:operator@127.0.0.1:5432/operator
 
 .PHONY: up down migrate seed test test-db test-voice api reset lint
 
