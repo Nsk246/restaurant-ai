@@ -22,10 +22,17 @@ class GeminiLiveProvider:
     input_hz = 16000
     output_hz = 24000
 
-    def __init__(self, api_key: str, model: str, voice: str = "Aoede"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        voice: str = "Aoede",
+        thinking_level: str = "minimal",
+    ):
         self.api_key = api_key
         self.model = model
         self.voice = voice
+        self.thinking_level = thinking_level
         self._session = None
         self._ctx = None
         self._closed = False
@@ -45,9 +52,23 @@ class GeminiLiveProvider:
         }
         if tools:
             config["tools"] = [{"function_declarations": tools}]
+        if self.thinking_level:
+            # Lower thinking means faster first audio. On a phone call the
+            # caller hears the delay, so this is not a free knob.
+            config["thinking_config"] = {"thinking_level": self.thinking_level}
 
         self._ctx = self._client.aio.live.connect(model=self.model, config=config)
-        self._session = await self._ctx.__aenter__()
+        try:
+            self._session = await self._ctx.__aenter__()
+        except Exception as exc:
+            # Model ids churn on the developer tier. Say which one failed
+            # rather than surfacing a bare 404 from deep in the SDK.
+            raise RuntimeError(
+                f"could not open a Gemini Live session with model "
+                f"{self.model!r}. Check the model id is current at "
+                f"https://ai.google.dev/gemini-api/docs/models. Underlying "
+                f"error: {type(exc).__name__}: {exc}"
+            ) from exc
 
     async def send_audio(self, pcm: bytes) -> None:
         from google.genai import types

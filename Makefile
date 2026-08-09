@@ -4,7 +4,7 @@ DB ?= postgresql://operator:operator@127.0.0.1:5432/operator
 
 up:       ; docker compose up -d
 down:     ; docker compose down
-migrate:  ; @for f in db/migrations/*.sql; do echo "-> $$f"; psql "$(DB)" -q -v ON_ERROR_STOP=1 -f $$f; done
+migrate:  ; @bash db/migrate.sh "$(DB)"
 seed:     ; @for f in db/seed/*.sql; do echo "-> $$f"; psql "$(DB)" -q -v ON_ERROR_STOP=1 -f $$f; done
 test-db:  ; @psql "$(DB)" -q -v ON_ERROR_STOP=1 -f db/tests/test_schema.sql 2>&1 | sed 's/^.*NOTICE:  //'
 test-voice: ; @cd services/voice && python -m pytest -q

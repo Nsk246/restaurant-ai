@@ -93,6 +93,42 @@ M1's gate is p50 under 900ms with barge-in interrupting cleanly. Talk over the
 agent mid-sentence and confirm it stops immediately rather than finishing its
 thought.
 
+## Making a real call
+
+1. Get a key at aistudio.google.com. Native-audio Live models need a billed
+   project, not just a free key.
+2. In `.env`: `GEMINI_API_KEY=...` and `REALTIME_PROVIDER=gemini`.
+3. Deploy, because the Codespaces relay is unreliable for the media stream:
+
+       fly launch --no-deploy --copy-config --name restaurant-ai-voice
+       fly secrets set GEMINI_API_KEY=... TWILIO_ACCOUNT_SID=... \
+         TWILIO_AUTH_TOKEN=... REALTIME_PROVIDER=gemini \
+         DATABASE_URL=... PUBLIC_BASE_URL=restaurant-ai-voice.fly.dev
+       fly deploy
+
+   `DATABASE_URL` must point at a database Fly can reach. `fly postgres create`
+   then `fly postgres attach`, and apply migrations and seed against it.
+4. Twilio Console, your number, Voice Configuration: Webhook, POST, to
+   `https://restaurant-ai-voice.fly.dev/twilio/voice`.
+5. Call from the phone you signed up with. Trial notice first, then the agent.
+
+What to try on the call, in order of how much it tells you:
+
+- "What's on the menu?" Confirms the snapshot reached the model.
+- "Two hot chicken, extra hot, no pickles." Confirms tool calls with modifiers
+  and a kitchen note.
+- "Actually make that one." Confirms mid-order correction.
+- Interrupt it mid-sentence. Confirms barge-in.
+- "Is the grain bowl vegan?" Confirms it answers from tags, not invention.
+
+Then check what landed:
+
+    psql "$DATABASE_URL" -c "select order_number, status, total_cents from orders order by created_at desc limit 3;"
+    psql "$DATABASE_URL" -c "select p50_response_ms, p95_response_ms, turn_count from conversations order by started_at desc limit 1;"
+
+p50 under 900ms is the M1 gate. Cost is roughly half a cent per minute of
+audio in and under two cents per minute out, so a test call costs pennies.
+
 ## Troubleshooting
 
 **Silence on the call, no errors in logs.** Almost always TwiML using
@@ -117,6 +153,10 @@ then re-run `bash .devcontainer/setup.sh`.
 passwordless sudo to root only; `sudo -u postgres` targets a third user and
 falls outside that rule, so it prompts for a password that was never set.
 Fixed: privileged Postgres commands now go through root via `sudo su postgres`.
+
+**Gemini session fails to open.** Model ids churn on the developer tier. The
+error names the model it tried; check the current list at
+https://ai.google.dev/gemini-api/docs/models and set `GEMINI_LIVE_MODEL`.
 
 **Twilio 31920.** The WebSocket upgrade was rejected. Deploy to Fly and repoint.
 

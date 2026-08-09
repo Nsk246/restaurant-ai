@@ -54,21 +54,22 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "name": "add_item",
         "description": (
-            "Add one item to the order. menu_item_id and modifier_ids must be "
-            "ids from the menu you were given. Never invent an id."
+            "Add one item to the order. item_code and modifier_codes are the "
+            "short codes in square brackets in the menu, like 'smash-burger'. "
+            "Never invent one."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "menu_item_id": {"type": "string"},
+                "item_code": {"type": "string"},
                 "quantity": {"type": "integer", "minimum": 1},
-                "modifier_ids": {"type": "array", "items": {"type": "string"}},
+                "modifier_codes": {"type": "array", "items": {"type": "string"}},
                 "note": {
                     "type": "string",
                     "description": "Free text for the kitchen, e.g. 'no pickles'",
                 },
             },
-            "required": ["menu_item_id"],
+            "required": ["item_code"],
         },
     },
     {
@@ -163,7 +164,8 @@ class ToolDispatcher:
         hits = menu_mod.find_candidates(self.menu, args.get("query", ""))
         return {
             "candidates": [
-                {"id": h["id"], "name": h["name"], "price": h["price"]} for h in hits[:5]
+                {"code": h["code"], "name": h["name"], "price": h["price"]}
+                for h in hits[:5]
             ]
         }
 
@@ -191,9 +193,9 @@ class ToolDispatcher:
                 conn,
                 order_id=self.order_id,
                 restaurant_id=self.tenant.id,
-                menu_item_id=args["menu_item_id"],
+                item_code=args["item_code"],
                 quantity=int(args.get("quantity", 1)),
-                modifier_ids=args.get("modifier_ids") or [],
+                modifier_codes=args.get("modifier_codes") or [],
                 note=args.get("note"),
             )
             q = await orders.quote(conn, order_id=self.order_id)

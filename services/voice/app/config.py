@@ -21,7 +21,12 @@ class Settings(BaseSettings):
 
     realtime_provider: str = "gemini"
     gemini_api_key: str = ""
-    gemini_live_model: str = "gemini-2.0-flash-live-001"
+    # Gemini 2.0 Flash models were retired in March 2026. Model ids churn on
+    # the developer tier, so this is configurable and failures are explicit.
+    gemini_live_model: str = "gemini-3.1-flash-live-preview"
+    # Minimal thinking is the default for the lowest time-to-first-audio,
+    # which is the number this whole product is judged on.
+    gemini_thinking_level: str = "minimal"
     gemini_voice: str = "Aoede"
 
     tool_timeout_ms: int = 1200

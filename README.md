@@ -39,8 +39,11 @@ cannot bypass them.
   until `review_order` has run, and any change to the order invalidates a
   previous readback. This is enforced in the dispatcher, not asked for in the
   prompt.
-- **No invented dishes.** `add_item` accepts menu uuids only, validated against
-  the tenant's own menu. A modifier belonging to a different item is rejected.
+- **No invented dishes.** `add_item` accepts short menu codes only, validated
+  against the tenant's own menu. A modifier belonging to a different item is
+  rejected. Codes rather than uuids because a native-audio model has to
+  reproduce them exactly in a function call, and long random tokens are where
+  speech-to-speech models fail.
 - **No selling what is 86'd.** `v_sellable_menu` filters on `is_available`, so
   an out-of-stock item is absent from the agent's context entirely rather than
   being something the prompt has to remember to avoid.

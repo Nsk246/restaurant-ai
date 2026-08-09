@@ -43,9 +43,7 @@ async def _pool():
     """
     attempts = [DSN]
     if "127.0.0.1" in DSN or "localhost" in DSN:
-        attempts.append(
-            "postgresql://operator:operator@/operator?host=/var/run/postgresql"
-        )
+        attempts.append("postgresql://operator:operator@/operator?host=/var/run/postgresql")
     errors = []
     for dsn in attempts:
         try:
@@ -108,10 +106,11 @@ async def kit():
 
 
 def item_id(menu, name):
+    """Short code for an item. Named for what the tools take, not the PK."""
     for cat in menu:
         for it in cat["items"]:
             if it["name"] == name:
-                return it["id"]
+                return it["code"]
     raise AssertionError(f"{name} not in snapshot")
 
 
@@ -122,7 +121,7 @@ def modifier_id(menu, item_name, mod_name):
                 for g in it.get("modifier_groups", []):
                     for o in g["options"]:
                         if o["name"] == mod_name:
-                            return o["id"]
+                            return o["code"]
     raise AssertionError(f"{mod_name} not a modifier of {item_name}")
 
 
@@ -130,7 +129,11 @@ def modifier_id(menu, item_name, mod_name):
 
 
 async def test_tenant_resolves_from_the_dialled_number(kit):
-    """Whatever number is seeded must route to the pilot restaurant."""
+    """Whatever number is seeded must route to the pilot restaurant.
+
+    Asserted against the seeded value rather than a literal, so replacing the
+    placeholder with a real Twilio number does not break the suite.
+    """
     assert kit["tenant"].name == "Broadway Kitchen"
     assert kit["number"].startswith("+")
 
@@ -149,13 +152,15 @@ async def test_snapshot_contains_ids_prices_and_aliases(kit):
                 burger = it
     assert burger and burger["price"] == 16.50
     assert "burger" in burger["aliases"]
+    # Short, stable, and speakable in a log. Not a uuid.
+    assert burger["code"] == "smash-burger"
 
 
 async def test_simple_order_reaches_the_kitchen(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
     r = await d.dispatch(
-        "add_item", {"menu_item_id": item_id(kit["menu"], "Smash Burger"), "quantity": 2}
+        "add_item", {"item_code": item_id(kit["menu"], "Smash Burger"), "quantity": 2}
     )
     assert "error" not in r
     await d.dispatch("review_order", {})
@@ -171,9 +176,9 @@ async def test_totals_include_modifiers_and_tax(kit):
     await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Smash Burger"),
+            "item_code": item_id(kit["menu"], "Smash Burger"),
             "quantity": 1,
-            "modifier_ids": [modifier_id(kit["menu"], "Smash Burger", "Bacon")],
+            "modifier_codes": [modifier_id(kit["menu"], "Smash Burger", "Bacon")],
         },
     )
     rev = await d.dispatch("review_order", {})
@@ -187,7 +192,7 @@ async def test_note_is_carried_to_the_kitchen_verbatim(kit):
     await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Smash Burger"),
+            "item_code": item_id(kit["menu"], "Smash Burger"),
             "note": "no pickles, extra sauce on the side",
         },
     )
@@ -203,7 +208,7 @@ async def test_caller_changes_quantity_mid_order(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
     r = await d.dispatch(
-        "add_item", {"menu_item_id": item_id(kit["menu"], "Fries"), "quantity": 1}
+        "add_item", {"item_code": item_id(kit["menu"], "Fries"), "quantity": 1}
     )
     await d.dispatch("change_quantity", {"line_id": r["line_id"], "quantity": 3})
     rev = await d.dispatch("review_order", {})
@@ -213,12 +218,12 @@ async def test_caller_changes_quantity_mid_order(kit):
 async def test_caller_removes_an_item(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
-    a = await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    a = await d.dispatch("add_item", {"item_code": item_id(kit["menu"], "Fries")})
     await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Sweet Tea"),
-            "modifier_ids": [modifier_id(kit["menu"], "Sweet Tea", "Large")],
+            "item_code": item_id(kit["menu"], "Sweet Tea"),
+            "modifier_codes": [modifier_id(kit["menu"], "Sweet Tea", "Large")],
         },
     )
     await d.dispatch("change_quantity", {"line_id": a["line_id"], "quantity": 0})
@@ -230,6 +235,7 @@ async def test_find_item_matches_what_people_say_out_loud(kit):
     d = await kit["make"]()
     r = await d.dispatch("find_item", {"query": "the wings"})
     assert r["candidates"] and r["candidates"][0]["name"] == "Nashville Hot Wings"
+    assert r["candidates"][0]["code"] == "nashville-hot-wings"
 
 
 async def test_find_item_returns_nothing_for_a_dish_we_do_not_have(kit):
@@ -244,9 +250,9 @@ async def test_spoken_summary_is_readable_aloud(kit):
     await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken"),
+            "item_code": item_id(kit["menu"], "Nashville Hot Chicken"),
             "quantity": 2,
-            "modifier_ids": [modifier_id(kit["menu"], "Nashville Hot Chicken", "Hot")],
+            "modifier_codes": [modifier_id(kit["menu"], "Nashville Hot Chicken", "Hot")],
         },
     )
     rev = await d.dispatch("review_order", {})
@@ -260,7 +266,7 @@ async def test_spoken_summary_is_readable_aloud(kit):
 async def test_model_cannot_invent_a_menu_item(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
-    r = await d.dispatch("add_item", {"menu_item_id": str(uuid.uuid4())})
+    r = await d.dispatch("add_item", {"item_code": "truffle-risotto"})
     assert "error" in r and "not on the menu" in r["error"]
 
 
@@ -268,15 +274,17 @@ async def test_cannot_sell_an_86d_item(kit):
     pool = kit["pool"]
     iid = item_id(kit["menu"], "Fries")
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE menu_items SET is_available=false WHERE id=$1", iid)
+        await conn.execute("UPDATE menu_items SET is_available=false WHERE code=$1", iid)
     try:
         d = await kit["make"]()
         await d.dispatch("start_order", {"order_type": "pickup"})
-        r = await d.dispatch("add_item", {"menu_item_id": iid})
+        r = await d.dispatch("add_item", {"item_code": iid})
         assert "error" in r and "out of" in r["error"]
     finally:
         async with pool.acquire() as conn:
-            await conn.execute("UPDATE menu_items SET is_available=true WHERE id=$1", iid)
+            await conn.execute(
+                "UPDATE menu_items SET is_available=true WHERE code=$1", iid
+            )
 
 
 async def test_86d_item_disappears_from_the_snapshot_entirely(kit):
@@ -285,11 +293,13 @@ async def test_86d_item_disappears_from_the_snapshot_entirely(kit):
     async with pool.acquire() as conn:
         try:
             await conn.execute(
-                "UPDATE menu_items SET is_available=false WHERE id=$1", iid
+                "UPDATE menu_items SET is_available=false WHERE code=$1", iid
             )
             snap = await menu_mod.snapshot(conn, kit["tenant"].id)
         finally:
-            await conn.execute("UPDATE menu_items SET is_available=true WHERE id=$1", iid)
+            await conn.execute(
+                "UPDATE menu_items SET is_available=true WHERE code=$1", iid
+            )
     names = [it["name"] for cat in snap for it in cat["items"]]
     assert "Pecan Pie" not in names
 
@@ -299,7 +309,7 @@ async def test_required_choice_must_be_made(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
     r = await d.dispatch(
-        "add_item", {"menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken")}
+        "add_item", {"item_code": item_id(kit["menu"], "Nashville Hot Chicken")}
     )
     # The error is the group's own prompt, so it can be spoken verbatim.
     assert "error" in r and "hot" in r["error"].lower()
@@ -311,8 +321,8 @@ async def test_modifier_from_another_item_is_rejected(kit):
     r = await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Smash Burger"),
-            "modifier_ids": [modifier_id(kit["menu"], "Ribeye", "Medium rare")],
+            "item_code": item_id(kit["menu"], "Smash Burger"),
+            "modifier_codes": [modifier_id(kit["menu"], "Ribeye", "Medium rare")],
         },
     )
     assert "error" in r
@@ -324,8 +334,8 @@ async def test_too_many_choices_in_a_single_select_group_rejected(kit):
     r = await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken"),
-            "modifier_ids": [
+            "item_code": item_id(kit["menu"], "Nashville Hot Chicken"),
+            "modifier_codes": [
                 modifier_id(kit["menu"], "Nashville Hot Chicken", "Mild"),
                 modifier_id(kit["menu"], "Nashville Hot Chicken", "Hot"),
             ],
@@ -338,7 +348,7 @@ async def test_confirm_without_reading_back_is_refused(kit):
     """The readback is not a prompt instruction. It is enforced."""
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
-    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch("add_item", {"item_code": item_id(kit["menu"], "Fries")})
     r = await d.dispatch("confirm_order", {})
     assert "error" in r and "read the order back" in r["error"]
 
@@ -346,9 +356,9 @@ async def test_confirm_without_reading_back_is_refused(kit):
 async def test_adding_an_item_invalidates_a_previous_readback(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
-    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch("add_item", {"item_code": item_id(kit["menu"], "Fries")})
     await d.dispatch("review_order", {})
-    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Cornbread")})
+    await d.dispatch("add_item", {"item_code": item_id(kit["menu"], "Cornbread")})
     r = await d.dispatch("confirm_order", {})
     assert "error" in r, "order changed after readback but confirmed anyway"
 
@@ -364,7 +374,7 @@ async def test_empty_order_cannot_be_confirmed(kit):
 async def test_confirming_twice_does_not_fire_two_tickets(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
-    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Cornbread")})
+    await d.dispatch("add_item", {"item_code": item_id(kit["menu"], "Cornbread")})
     await d.dispatch("review_order", {})
     before = len(kit["fired"])
     first = await d.dispatch("confirm_order", {})
@@ -383,7 +393,7 @@ async def test_start_order_twice_reuses_the_same_draft(kit):
 async def test_dine_in_requires_a_table(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "dine_in"})
-    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch("add_item", {"item_code": item_id(kit["menu"], "Fries")})
     await d.dispatch("review_order", {})
     r = await d.dispatch("confirm_order", {})
     assert "error" in r, "dine-in confirmed with no table"
@@ -392,7 +402,7 @@ async def test_dine_in_requires_a_table(kit):
 async def test_dine_in_succeeds_with_a_table(kit):
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "dine_in"})
-    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch("add_item", {"item_code": item_id(kit["menu"], "Fries")})
     await d.dispatch("review_order", {})
     r = await d.dispatch("confirm_order", {"table_label": "12"})
     assert r.get("order_number")
@@ -417,17 +427,19 @@ async def test_menu_edit_does_not_rewrite_a_fired_order(kit):
     iid = item_id(kit["menu"], "Cornbread")
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
-    await d.dispatch("add_item", {"menu_item_id": iid})
+    await d.dispatch("add_item", {"item_code": iid})
     await d.dispatch("review_order", {})
     out = await d.dispatch("confirm_order", {})
     async with pool.acquire() as conn:
         # Capture the real price rather than hardcoding it. A failed run that
         # restores the wrong value silently poisons every later run.
         original = await conn.fetchval(
-            "SELECT price_cents FROM menu_items WHERE id=$1", iid
+            "SELECT price_cents FROM menu_items WHERE code=$1", iid
         )
         try:
-            await conn.execute("UPDATE menu_items SET price_cents=9999 WHERE id=$1", iid)
+            await conn.execute(
+                "UPDATE menu_items SET price_cents=9999 WHERE code=$1", iid
+            )
             total = await conn.fetchval(
                 "SELECT total_cents FROM orders WHERE order_number=$1"
                 " AND business_date=CURRENT_DATE",
@@ -435,7 +447,7 @@ async def test_menu_edit_does_not_rewrite_a_fired_order(kit):
             )
         finally:
             await conn.execute(
-                "UPDATE menu_items SET price_cents=$2 WHERE id=$1", iid, original
+                "UPDATE menu_items SET price_cents=$2 WHERE code=$1", iid, original
             )
     assert total < 1000, "a later menu edit rewrote a fired order"
 
@@ -448,9 +460,9 @@ async def test_order_lands_in_the_database_exactly_as_spoken(kit):
     await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken"),
+            "item_code": item_id(kit["menu"], "Nashville Hot Chicken"),
             "quantity": 2,
-            "modifier_ids": [
+            "modifier_codes": [
                 modifier_id(kit["menu"], "Nashville Hot Chicken", "Extra Hot")
             ],
             "note": "no pickles",
@@ -459,7 +471,7 @@ async def test_order_lands_in_the_database_exactly_as_spoken(kit):
     await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Mac and Cheese"),
+            "item_code": item_id(kit["menu"], "Mac and Cheese"),
             "quantity": 1,
         },
     )
@@ -496,7 +508,7 @@ async def test_order_error_messages_are_speakable(kit):
     """These strings get read aloud to a customer. No stack traces, no jargon."""
     d = await kit["make"]()
     await d.dispatch("start_order", {"order_type": "pickup"})
-    r = await d.dispatch("add_item", {"menu_item_id": str(uuid.uuid4())})
+    r = await d.dispatch("add_item", {"item_code": "truffle-risotto"})
     msg = r["error"]
     assert msg == msg.lower() or msg[0].isupper()
     assert "Traceback" not in msg and "psycopg" not in msg and "asyncpg" not in msg
@@ -510,8 +522,8 @@ async def test_quote_uses_integer_money_throughout(kit):
     await d.dispatch(
         "add_item",
         {
-            "menu_item_id": item_id(kit["menu"], "Sweet Tea"),
-            "modifier_ids": [modifier_id(kit["menu"], "Sweet Tea", "Large")],
+            "item_code": item_id(kit["menu"], "Sweet Tea"),
+            "modifier_codes": [modifier_id(kit["menu"], "Sweet Tea", "Large")],
             "quantity": 3,
         },
     )
@@ -520,3 +532,47 @@ async def test_quote_uses_integer_money_throughout(kit):
     assert isinstance(q.subtotal_cents, int)
     assert isinstance(q.tax_cents, int)
     assert q.total_cents == q.subtotal_cents + q.tax_cents
+
+
+async def test_codes_are_short_enough_for_a_voice_model_to_reproduce(kit):
+    """A native-audio model must emit these exactly in a function call.
+
+    Long random tokens are where speech-to-speech models fail, which is why
+    the menu stopped exposing uuids.
+    """
+    for cat in kit["menu"]:
+        for it in cat["items"]:
+            assert len(it["code"]) <= 24, it["code"]
+            assert "-" not in it["code"][:1]
+            assert it["code"].replace("-", "").isalnum()
+            for g in it.get("modifier_groups", []):
+                for o in g["options"]:
+                    assert len(o["code"]) <= 26, o["code"]
+
+
+async def test_a_uuid_is_no_longer_a_valid_item_reference(kit):
+    """Guard against a half-finished migration leaving both paths alive."""
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch("add_item", {"item_code": str(uuid.uuid4())})
+    assert "error" in r
+
+
+async def test_item_codes_are_case_and_whitespace_tolerant(kit):
+    """Models capitalise and pad things. That should not lose an order."""
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch("add_item", {"item_code": "  Smash-Burger  "})
+    assert "error" not in r, r
+
+
+async def test_snapshot_exposes_no_uuids_at_all(kit):
+    """Every uuid in the prompt is tokens spent and a chance to hallucinate."""
+    import json
+    import re
+
+    blob = json.dumps(kit["menu"])
+    uuids = re.findall(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", blob
+    )
+    assert uuids == [], f"snapshot still leaks uuids: {uuids[:2]}"

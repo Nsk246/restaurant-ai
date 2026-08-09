@@ -105,21 +105,26 @@ async def add_item(
     *,
     order_id: str,
     restaurant_id: str,
-    menu_item_id: str,
+    item_code: str,
     quantity: int = 1,
-    modifier_ids: list[str] | None = None,
+    modifier_codes: list[str] | None = None,
     note: str | None = None,
 ) -> str:
-    """Add one line. Validates the item and every modifier against the menu."""
+    """Add one line. Validates the item and every modifier against the menu.
+
+    Takes short codes rather than uuids. The model has to reproduce these
+    exactly in a function call, and a native-audio model reproducing a
+    36-character random string is a coin flip.
+    """
     if quantity < 1:
         raise OrderError("quantity must be at least one")
 
     item = await conn.fetchrow(
         """
         SELECT id, name, price_cents, is_available, is_active, prep_minutes
-        FROM menu_items WHERE id = $1 AND restaurant_id = $2
+        FROM menu_items WHERE code = $1 AND restaurant_id = $2
         """,
-        menu_item_id,
+        (item_code or "").strip().lower(),
         restaurant_id,
     )
     if item is None:
@@ -129,7 +134,7 @@ async def add_item(
     if not item["is_available"]:
         raise OrderError(f"we are out of {item['name']} tonight")
 
-    mods = await _validate_modifiers(conn, menu_item_id, modifier_ids or [])
+    mods = await _validate_modifiers(conn, item["id"], modifier_codes or [])
 
     line = await conn.fetchrow(
         """
@@ -141,7 +146,7 @@ async def add_item(
         RETURNING id
         """,
         order_id,
-        menu_item_id,
+        item["id"],
         item["name"],
         item["price_cents"],
         quantity,
@@ -165,30 +170,31 @@ async def add_item(
 
 
 async def _validate_modifiers(
-    conn: asyncpg.Connection, menu_item_id: str, modifier_ids: list[str]
+    conn: asyncpg.Connection, menu_item_id: str, modifier_codes: list[str]
 ) -> list[asyncpg.Record]:
     """Modifiers must belong to this item's groups, be available, and satisfy
     each group's min and max selection rules."""
-    if not modifier_ids:
+    modifier_codes = [c.strip().lower() for c in modifier_codes if c and c.strip()]
+    if not modifier_codes:
         await _check_required_groups(conn, menu_item_id, [])
         return []
 
     rows = await conn.fetch(
         """
-        SELECT m.id, m.name, m.price_delta_cents, m.is_available,
+        SELECT m.id, m.code, m.name, m.price_delta_cents, m.is_available,
                mg.id AS group_id, mg.name AS group_name,
                mg.min_select, mg.max_select
         FROM modifiers m
         JOIN modifier_groups mg ON mg.id = m.modifier_group_id
         JOIN menu_item_modifier_groups link
           ON link.modifier_group_id = mg.id AND link.menu_item_id = $1
-        WHERE m.id = ANY($2::uuid[])
+        WHERE m.code = ANY($2::text[])
         """,
         menu_item_id,
-        modifier_ids,
+        modifier_codes,
     )
-    found = {str(r["id"]) for r in rows}
-    missing = [m for m in modifier_ids if m not in found]
+    found = {r["code"] for r in rows}
+    missing = [m for m in modifier_codes if m not in found]
     if missing:
         raise OrderError("one of those options is not available for that item")
     for r in rows:

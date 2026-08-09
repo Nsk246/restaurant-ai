@@ -75,6 +75,7 @@ def build_provider():
         api_key=settings.gemini_api_key,
         model=settings.gemini_live_model,
         voice=settings.gemini_voice,
+        thinking_level=settings.gemini_thinking_level,
     )
 
 

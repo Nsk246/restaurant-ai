@@ -59,7 +59,7 @@ def render_for_prompt(menu: list[dict]) -> str:
     for cat in menu:
         out.append(f"\n## {cat['category']}")
         for it in cat["items"]:
-            line = f"- [{it['id']}] {it['name']} ${it['price']:.2f}"
+            line = f"- [{it['code']}] {it['name']} ${it['price']:.2f}"
             if it.get("aliases"):
                 line += f" (also called: {', '.join(it['aliases'])})"
             if it.get("tags"):
@@ -68,7 +68,7 @@ def render_for_prompt(menu: list[dict]) -> str:
             for g in it.get("modifier_groups", []):
                 req = "required" if g["required"] else "optional"
                 opts = ", ".join(
-                    f"[{o['id']}] {o['name']}"
+                    f"[{o['code']}] {o['name']}"
                     + (f" +${o['price_delta']:.2f}" if o["price_delta"] else "")
                     for o in g["options"]
                 )
