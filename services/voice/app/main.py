@@ -33,7 +33,11 @@ from .kitchen import InternalKDS
 from .providers.gemini import GeminiLiveProvider
 from .providers.mock import MockProvider
 from .telephony.bridge import MediaBridge
-from .telephony.twilio_webhook import connect_stream_twiml, validate_twilio_signature
+from .telephony.twilio_webhook import (
+    connect_stream_twiml,
+    public_url,
+    validate_twilio_signature,
+)
 
 log = logging.getLogger(__name__)
 settings = get_settings()
@@ -127,13 +131,30 @@ async def inbound_call(
     """Twilio hits this when someone dials."""
     form = dict(await request.form())
     if settings.twilio_validate_signature and settings.app_env != "test":
+        signed_url = public_url(request)
+        # Temporary diagnostic: the exact inputs to signature validation.
+        log.warning(
+            "TWILIO DEBUG url=%s scheme=%s netloc=%s fwd-proto=%s fwd-host=%s host=%s",
+            signed_url,
+            request.url.scheme,
+            request.url.netloc,
+            request.headers.get("x-forwarded-proto"),
+            request.headers.get("x-forwarded-host"),
+            request.headers.get("host"),
+        )
         ok = validate_twilio_signature(
             settings.twilio_auth_token,
-            str(request.url),
+            signed_url,
             form,
             request.headers.get("X-Twilio-Signature", ""),
         )
         if not ok:
+            log.warning(
+                "twilio signature mismatch. Validated against %s. If that is not "
+                "the URL configured in the Twilio console, they must match "
+                "exactly, including https and any trailing slash.",
+                signed_url,
+            )
             return Response(status_code=403, content="invalid signature")
 
     call_id = CallSid or str(uuid.uuid4())
@@ -141,7 +162,20 @@ async def inbound_call(
     # see it, so stash it here.
     _dialled[call_id] = {"to": To, "from": From}
 
-    base = settings.public_base_url.replace("https://", "").replace("http://", "")
+    # Strip scheme and any trailing slash. A trailing slash produces
+    # wss://host//ws/twilio/... which Twilio cannot open, and the call fails
+    # with a generic application error that says nothing about the cause.
+    base = (
+        settings.public_base_url.replace("https://", "").replace("http://", "").strip("/")
+    )
+    if not base:
+        log.error("PUBLIC_BASE_URL is not set; the media stream cannot connect")
+    elif "app.github.dev" in base and "-8000" not in base:
+        log.warning(
+            "PUBLIC_BASE_URL %r looks like the Codespace editor host, not the "
+            "forwarded port. It should end -8000.app.github.dev",
+            base,
+        )
     ws_url = f"wss://{base}/ws/twilio/{call_id}"
     return Response(content=connect_stream_twiml(ws_url), media_type="application/xml")
 

@@ -15,4 +15,5 @@ EXPOSE 8000
 # One worker on purpose. Call state lives in the process until Redis lands in
 # M2; multiple workers would drop callers onto a process that has never heard
 # of them.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]

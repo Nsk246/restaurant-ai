@@ -9,6 +9,24 @@ from __future__ import annotations
 from twilio.request_validator import RequestValidator
 
 
+def public_url(request) -> str:
+    """The URL Twilio actually signed.
+
+    Behind a proxy (Codespaces port forwarding, Fly, any load balancer) the
+    app sees http:// and an internal host, while Twilio signed the public
+    https:// URL. Validating against the internal one fails every time and
+    surfaces as a 403 with no explanation.
+    """
+    url = str(request.url)
+    proto = request.headers.get("x-forwarded-proto")
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if proto:
+        url = url.replace(f"{request.url.scheme}://", f"{proto}://", 1)
+    if host and host != request.url.netloc:
+        url = url.replace(request.url.netloc, host, 1)
+    return url
+
+
 def validate_twilio_signature(
     auth_token: str, url: str, params: dict[str, str], signature: str
 ) -> bool:

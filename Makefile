@@ -23,5 +23,8 @@ test: test-db test-voice
 lint:     ; ruff check services/voice
 portal:   ; cd web/portal && npm install --silent && npm run build
 portal-dev: ; cd web/portal && npm run dev
-api:      ; cd services/voice && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+# --proxy-headers is what makes X-Forwarded-* visible. Without it Twilio
+# signature validation fails behind Codespaces or any load balancer.
+api:      ; cd services/voice && uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+	    --reload --proxy-headers --forwarded-allow-ips="*"
 reset:    ; docker compose down -v && docker compose up -d && sleep 6 && $(MAKE) migrate seed test

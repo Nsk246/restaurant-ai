@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Absolute path, not ".env". A relative env_file resolves against the
+    # working directory, and the service is launched from services/voice, so
+    # a repo-root .env was silently ignored and every setting fell back to
+    # its default. That failure is invisible: the app starts fine and simply
+    # behaves as if you had configured nothing.
+    model_config = SettingsConfigDict(
+        env_file=str(Path(__file__).resolve().parents[3] / ".env"),
+        extra="ignore",
+    )
 
     database_url: str = "postgresql://operator:operator@localhost:5432/operator"
     redis_url: str = "redis://localhost:6379/0"
