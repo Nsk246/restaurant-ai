@@ -26,23 +26,53 @@ from app.kitchen import InternalKDS
 DSN = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://operator:operator@127.0.0.1:5432/operator"
 )
-PILOT_NUMBER = "+16155550111"
+# Look the tenant up by slug, not by phone number. The seeded number is meant
+# to be replaced with a real Twilio number, and a test that hardcodes it
+# breaks the moment someone does the thing they were told to do.
+PILOT_SLUG = "pilot"
 
 pytestmark = pytest.mark.asyncio
 
 
 async def _pool():
-    try:
-        return await asyncpg.create_pool(DSN, min_size=1, max_size=4, timeout=3)
-    except Exception:
-        pytest.skip("no database reachable")
+    """Connect, trying TCP then the unix socket.
+
+    A Debian Postgres may be listening only on the socket, in which case psql
+    works fine while a TCP connection is refused. Trying both stops that
+    difference from silently disabling this whole suite.
+    """
+    attempts = [DSN]
+    if "127.0.0.1" in DSN or "localhost" in DSN:
+        attempts.append(
+            "postgresql://operator:operator@/operator?host=/var/run/postgresql"
+        )
+    errors = []
+    for dsn in attempts:
+        try:
+            return await asyncpg.create_pool(dsn, min_size=1, max_size=4, timeout=3)
+        except Exception as exc:
+            errors.append(f"{dsn.split('@')[-1]}: {type(exc).__name__}: {exc}")
+    # Say why. A skip with no reason is how a suite quietly stops running and
+    # everyone keeps trusting it.
+    pytest.skip("no database reachable -> " + " | ".join(errors))
 
 
 @pytest.fixture
 async def kit():
     pool = await _pool()
     async with pool.acquire() as conn:
-        tenant = await menu_mod.resolve_tenant(conn, PILOT_NUMBER)
+        number = await conn.fetchval(
+            """
+            SELECT p.e164 FROM phone_numbers p
+            JOIN restaurants r ON r.id = p.restaurant_id
+            WHERE r.slug = $1 AND p.is_active
+            ORDER BY p.created_at LIMIT 1
+            """,
+            PILOT_SLUG,
+        )
+        if number is None:
+            pytest.skip(f"no active phone number seeded for slug {PILOT_SLUG!r}")
+        tenant = await menu_mod.resolve_tenant(conn, number)
         if tenant is None:
             pytest.skip("pilot tenant not seeded")
         snap = await menu_mod.snapshot(conn, tenant.id)
@@ -66,7 +96,14 @@ async def kit():
             pool, tenant=tenant, menu=snap, conversation_id=conv_id, kitchen=Sink()
         )
 
-    yield {"make": make, "menu": snap, "tenant": tenant, "pool": pool, "fired": fired}
+    yield {
+        "make": make,
+        "menu": snap,
+        "tenant": tenant,
+        "pool": pool,
+        "fired": fired,
+        "number": number,
+    }
     await pool.close()
 
 
@@ -93,7 +130,15 @@ def modifier_id(menu, item_name, mod_name):
 
 
 async def test_tenant_resolves_from_the_dialled_number(kit):
+    """Whatever number is seeded must route to the pilot restaurant."""
     assert kit["tenant"].name == "Broadway Kitchen"
+    assert kit["number"].startswith("+")
+
+
+async def test_an_unknown_number_resolves_to_no_tenant(kit):
+    """A call to a number we do not own must be refused, not served."""
+    async with kit["pool"].acquire() as conn:
+        assert await menu_mod.resolve_tenant(conn, "+19999999999") is None
 
 
 async def test_snapshot_contains_ids_prices_and_aliases(kit):
@@ -356,7 +401,9 @@ async def test_dine_in_succeeds_with_a_table(kit):
 async def test_transfer_returns_the_restaurants_real_number(kit):
     d = await kit["make"]()
     r = await d.dispatch("transfer_to_human", {"reason": "caller asked"})
-    assert r["transferring"] and r["to"] == "+16155550100"
+    assert r["transferring"]
+    assert r["to"] == kit["tenant"].transfer_phone
+    assert r["to"] != kit["number"], "transfer target must not be our own number"
 
 
 async def test_unknown_tool_is_an_error_not_a_crash(kit):
