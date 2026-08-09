@@ -246,7 +246,8 @@ async def calls(limit: int = 10, slug: str | None = None) -> dict[str, Any]:
         rows = await conn.fetch(
             """
             SELECT id, external_id, from_e164, started_at, ended_at, outcome,
-                   turn_count, p50_response_ms, p95_response_ms
+                   turn_count, p50_response_ms, p95_response_ms,
+                   p50_model_ms, p50_transport_ms
             FROM conversations WHERE restaurant_id=$1
             ORDER BY started_at DESC LIMIT $2
             """,
@@ -268,6 +269,10 @@ async def calls(limit: int = 10, slug: str | None = None) -> dict[str, Any]:
                 "turns": r["turn_count"],
                 "p50_ms": r["p50_response_ms"],
                 "p95_ms": r["p95_response_ms"],
+                # Split so a slow model and a slow network are
+                # distinguishable. They need opposite fixes.
+                "model_ms": r["p50_model_ms"],
+                "transport_ms": r["p50_transport_ms"],
             }
             for r in rows
         ]

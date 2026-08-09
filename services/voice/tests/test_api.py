@@ -262,3 +262,39 @@ async def test_endpoints_report_a_database_outage_as_503(api, monkeypatch):
     monkeypatch.setattr(db, "_pool", None)
     assert api["client"].get("/api/rail").status_code == 503
     assert api["client"].get("/api/menu").status_code == 503
+
+
+async def test_calls_expose_the_latency_split(api):
+    """One number cannot tell a slow model from a slow network, and they need
+    opposite fixes. Guessing between them has already cost an evening."""
+    from app.agent import session as session_mod
+
+    async with api["pool"].acquire() as conn:
+        rid = await conn.fetchval("SELECT id FROM restaurants LIMIT 1")
+        conv = await session_mod.open_conversation(
+            conn,
+            restaurant_id=str(rid),
+            channel="phone",
+            external_id=f"api-{uuid.uuid4()}",
+        )
+        await session_mod.close_conversation(
+            conn,
+            conv,
+            outcome="order_placed",
+            stats={
+                "turn_count": 5,
+                "p50_response_ms": 2065,
+                "p95_response_ms": 2611,
+                "p50_model_ms": 1600,
+                "p50_transport_ms": 465,
+            },
+        )
+
+    call = next(
+        c
+        for c in api["client"].get("/api/calls?limit=10").json()["calls"]
+        if c["id"] == conv
+    )
+    assert call["p50_ms"] == 2065
+    assert call["model_ms"] == 1600
+    assert call["transport_ms"] == 465

@@ -66,6 +66,8 @@ async def close_conversation(
             turn_count = COALESCE($4, turn_count),
             p50_response_ms = COALESCE($5, p50_response_ms),
             p95_response_ms = COALESCE($6, p95_response_ms),
+            p50_model_ms = COALESCE($9, p50_model_ms),
+            p50_transport_ms = COALESCE($10, p50_transport_ms),
             transferred_to_human = $7,
             error_detail = COALESCE($8, error_detail)
         WHERE id = $1
@@ -78,6 +80,8 @@ async def close_conversation(
         stats.get("p95_response_ms"),
         transferred,
         error_detail,
+        stats.get("p50_model_ms"),
+        stats.get("p50_transport_ms"),
     )
 
 
