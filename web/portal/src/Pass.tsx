@@ -385,8 +385,8 @@ export default function Pass() {
                     {t.lines.map((ln, i) => (
                       <div className="ticket__line" key={i}>
                         <span className="ticket__qty">{ln.quantity}</span>
-                        <span>
-                          {ln.name}
+                        <span className="ticket__body">
+                          <span>{ln.name}</span>
                           {ln.modifiers.length > 0 && (
                             <span className="ticket__mods">
                               {ln.modifiers.join(", ")}

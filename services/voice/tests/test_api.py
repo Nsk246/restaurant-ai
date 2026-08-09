@@ -188,3 +188,70 @@ async def test_demo_reset_keeps_the_menu_itself(api):
         [i for cat in c.get("/api/menu").json()["categories"] for i in cat["items"]]
     )
     assert before == after
+
+
+async def test_an_open_conversation_row_is_not_by_itself_live(api):
+    """Liveness must come from a connected socket, not from a row with no end
+    time. A crashed process, or a seeding script, leaves rows open forever and
+    the portal would sit showing 'on a call' with an empty feed."""
+    async with api["pool"].acquire() as conn:
+        rid = await conn.fetchval("SELECT id FROM restaurants LIMIT 1")
+        await conn.execute(
+            """
+            INSERT INTO conversations (restaurant_id, channel, external_id,
+                                       started_at, ended_at)
+            VALUES ($1, 'phone', $2, now(), NULL)
+            """,
+            rid,
+            f"open-{uuid.uuid4()}",
+        )
+    calls = api["client"].get("/api/calls?limit=5").json()["calls"]
+    assert calls, "expected the conversation to be listed"
+    assert all(not c["live"] for c in calls)
+
+
+async def test_a_call_with_a_connected_socket_is_live(api):
+    from app import live
+
+    external = f"live-{uuid.uuid4()}"
+    async with api["pool"].acquire() as conn:
+        rid = await conn.fetchval("SELECT id FROM restaurants LIMIT 1")
+        await conn.execute(
+            """
+            INSERT INTO conversations (restaurant_id, channel, external_id,
+                                       started_at, ended_at)
+            VALUES ($1, 'phone', $2, now(), NULL)
+            """,
+            rid,
+            external,
+        )
+    live.mark_live(external, str(rid))
+    try:
+        calls = api["client"].get("/api/calls?limit=5").json()["calls"]
+        assert calls[0]["live"] is True
+    finally:
+        live.mark_ended(external)
+
+
+async def test_liveness_does_not_leak_across_tenants(api):
+    """A second restaurant must never see another kitchen's call as live."""
+    from app import live
+
+    external = f"other-{uuid.uuid4()}"
+    async with api["pool"].acquire() as conn:
+        rid = await conn.fetchval("SELECT id FROM restaurants LIMIT 1")
+        await conn.execute(
+            """
+            INSERT INTO conversations (restaurant_id, channel, external_id,
+                                       started_at, ended_at)
+            VALUES ($1, 'phone', $2, now(), NULL)
+            """,
+            rid,
+            external,
+        )
+    live.mark_live(external, str(uuid.uuid4()))  # a different restaurant
+    try:
+        calls = api["client"].get("/api/calls?limit=5").json()["calls"]
+        assert all(not c["live"] for c in calls)
+    finally:
+        live.mark_ended(external)

@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
-from . import db
+from . import db, live
 from .agent import menu as menu_mod
 from .config import get_settings
 
@@ -233,20 +233,16 @@ async def calls(limit: int = 10, slug: str | None = None) -> dict[str, Any]:
         rows = await conn.fetch(
             """
             SELECT id, external_id, from_e164, started_at, ended_at, outcome,
-                   turn_count, p50_response_ms, p95_response_ms,
-                   -- A conversation is live only if it has no end AND started
-                   -- recently. A crashed process, or a test row, leaves
-                   -- ended_at null forever, and the portal would then sit
-                   -- showing "on a call" with an empty feed.
-                   (ended_at IS NULL
-                    AND started_at > now() - ($3 || ' seconds')::interval) AS is_live
+                   turn_count, p50_response_ms, p95_response_ms
             FROM conversations WHERE restaurant_id=$1
             ORDER BY started_at DESC LIMIT $2
             """,
             rid,
             min(limit, 50),
-            str(get_settings().max_call_seconds),
         )
+    # Liveness comes from the connected sockets, not from a row that happens
+    # to have no end time.
+    connected = live.live_call_ids(rid)
     return {
         "calls": [
             {
@@ -254,7 +250,7 @@ async def calls(limit: int = 10, slug: str | None = None) -> dict[str, Any]:
                 "call_id": r["external_id"],
                 "from": r["from_e164"],
                 "started_at": r["started_at"].isoformat() if r["started_at"] else None,
-                "live": r["is_live"],
+                "live": r["external_id"] in connected,
                 "outcome": r["outcome"],
                 "turns": r["turn_count"],
                 "p50_ms": r["p50_response_ms"],
@@ -286,6 +282,7 @@ async def demo_reset(slug: str | None = None):
             await conn.execute(
                 "UPDATE menu_items SET is_available=true WHERE restaurant_id=$1", rid
             )
+    live.clear()
     await broadcast_rail(rid, {"type": "reset"})
     return {"reset": True}
 

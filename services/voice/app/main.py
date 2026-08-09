@@ -21,7 +21,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, notify
+from . import db, live, notify
 from .agent import menu as menu_mod
 from .agent import prompt as prompt_mod
 from .agent import session as session_mod
@@ -187,6 +187,7 @@ async def twilio_stream(ws: WebSocket, call_id: str):
             await session_mod.upsert_customer(
                 conn, restaurant_id=tenant.id, phone_e164=routing.get("from")
             )
+        live.mark_live(call_id, tenant.id)
         instructions = prompt_mod.build(tenant, snap)
         tools = TOOL_SCHEMAS
         dispatcher = ToolDispatcher(
@@ -222,6 +223,7 @@ async def twilio_stream(ws: WebSocket, call_id: str):
         err = str(exc)
         log.exception("call %s failed", call_id)
     finally:
+        live.mark_ended(call_id)
         if conversation_id:
             outcome = "error" if err else _outcome_for(dispatcher, bridge)
             with contextlib.suppress(Exception):
