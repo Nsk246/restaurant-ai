@@ -193,6 +193,11 @@ by `setup.sh`. On a container created before that change:
 
 **`GET / 404` from the API.** The portal has not been built. `make portal`.
 
+**Tests wiped my demo data.** They no longer can. Tests run against
+`operator_test`, created and migrated automatically by `make test`, because
+the API tests call `/api/demo/reset` and pointing them at the development
+database destroyed whatever was on the rail.
+
 **Gemini session fails to open.** Model ids churn on the developer tier. The
 error names the model it tried; check the current list at
 https://ai.google.dev/gemini-api/docs/models and set `GEMINI_LIVE_MODEL`.

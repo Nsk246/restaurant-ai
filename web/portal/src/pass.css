@@ -424,17 +424,17 @@ button:focus-visible,
   flex-direction: column;
 }
 
+/* A wrapping grid, not a sideways-scrolling strip. Real expo screens flow
+   tickets into rows so the whole board is visible at a glance; a horizontal
+   rail hides everything past the sixth ticket and leaves the band empty
+   below. Oldest first still reads left to right, top to bottom. */
 .rail {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
   gap: 12px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  align-content: start;
+  overflow-y: auto;
   padding-bottom: 6px;
-  /* Cards are bounded rather than stretched. Stretching to fill a tall row
-     produced 700px of empty panel under a two-line order with the button
-     marooned at the bottom. A min-height keeps them even; a max-height stops
-     a long order from setting the height of the whole rail. */
-  align-items: flex-start;
   min-height: 0;
   flex: 1;
 }
@@ -446,10 +446,8 @@ button:focus-visible,
   border: 1px solid var(--steel-600);
   border-top: 3px solid var(--steel-500);
   border-radius: 3px;
-  min-width: 216px;
-  max-width: 216px;
-  min-height: 188px;
-  max-height: min(340px, 100%);
+  min-height: 176px;
+  max-height: 300px;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -589,9 +587,11 @@ button:focus-visible,
   flex-wrap: wrap;
   gap: 6px;
   overflow-y: auto;
-  max-height: 96px;
+  max-height: 92px;
   align-content: start;
   flex: 0 0 auto;
+  padding-top: 2px;
+  border-top: 1px solid var(--steel-700);
 }
 
 .chip {

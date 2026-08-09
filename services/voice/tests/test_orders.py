@@ -23,9 +23,7 @@ from app.agent import session as session_mod
 from app.agent.tools import ToolDispatcher
 from app.kitchen import InternalKDS
 
-DSN = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql://operator:operator@127.0.0.1:5432/operator"
-)
+DSN = os.environ["TEST_DATABASE_URL"]
 # Look the tenant up by slug, not by phone number. The seeded number is meant
 # to be replaced with a real Twilio number, and a test that hardcodes it
 # breaks the moment someone does the thing they were told to do.

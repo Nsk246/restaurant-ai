@@ -13,9 +13,7 @@ from app.agent import session as session_mod
 from app.agent.tools import ToolDispatcher
 from app.main import app
 
-DSN = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql://operator:operator@127.0.0.1:5432/operator"
-)
+DSN = os.environ["TEST_DATABASE_URL"]
 
 pytestmark = pytest.mark.asyncio
 

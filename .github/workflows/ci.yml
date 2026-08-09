@@ -20,22 +20,24 @@ jobs:
           --health-timeout 5s --health-retries 10
     env:
       PGPASSWORD: operator
-      TEST_DATABASE_URL: postgresql://operator:operator@localhost:5432/operator
+      TEST_DATABASE_URL: postgresql://operator:operator@localhost:5432/operator_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
 
-      - name: Apply migrations and seed
+      - name: Create and migrate the test database
         run: |
+          psql -h localhost -U operator -d operator -q \
+            -c "CREATE DATABASE operator_test OWNER operator"
           bash db/migrate.sh "$TEST_DATABASE_URL"
           for f in db/seed/*.sql; do
-            psql -h localhost -U operator -d operator -q -v ON_ERROR_STOP=1 -f "$f"
+            psql -h localhost -U operator -d operator_test -q -v ON_ERROR_STOP=1 -f "$f"
           done
 
       - name: Schema assertions
         run: |
-          psql -h localhost -U operator -d operator -q -v ON_ERROR_STOP=1 \
+          psql -h localhost -U operator -d operator_test -q -v ON_ERROR_STOP=1 \
             -f db/tests/test_schema.sql 2>&1 | sed 's/^.*NOTICE:  //'
 
       - run: pip install -r services/voice/requirements.txt pytest pytest-asyncio ruff
@@ -56,5 +58,6 @@ jobs:
         # than a red one.
         run: |
           cd services/voice
-          python -m pytest -q --tb=short | tee /tmp/out.txt
+          TEST_DATABASE_URL="$TEST_DATABASE_URL" python -m pytest -q --tb=short \
+            | tee /tmp/out.txt
           grep -q "skipped" /tmp/out.txt && { echo "::error::tests skipped in CI"; exit 1; } || true
