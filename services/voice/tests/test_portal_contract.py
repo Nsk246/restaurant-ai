@@ -153,3 +153,59 @@ async def test_every_event_carries_the_call_id_for_routing():
 async def test_call_ended_reports_the_stats_the_status_rail_shows():
     seen = await _run([ProviderEvent(kind="transcript", role="agent", text="bye")])
     assert any(e["type"] == "status" for e in seen)
+
+
+async def test_call_start_and_finish_are_announced_on_the_rail_socket():
+    """The portal attaches its monitor on call_started rather than polling.
+
+    Without these two events it falls back to a request every few seconds,
+    which is noise in the logs and a delay before the feed appears.
+    """
+    import contextlib
+
+    from app import api, live
+
+    sent = []
+
+    class FakeRailWS:
+        async def send_text(self, text):
+            sent.append(json.loads(text))
+
+    rid = "11111111-1111-1111-1111-111111111111"
+    api._rail_watchers.setdefault(rid, set()).add(FakeRailWS())
+    try:
+        await api.broadcast_rail(rid, {"type": "call_started", "call_id": "CA1"})
+        await api.broadcast_rail(rid, {"type": "call_finished", "call_id": "CA1"})
+    finally:
+        api._rail_watchers.pop(rid, None)
+        with contextlib.suppress(Exception):
+            live.mark_ended("CA1")
+
+    kinds = [m["type"] for m in sent]
+    assert kinds == ["call_started", "call_finished"]
+    assert sent[0]["call_id"] == "CA1"
+
+
+async def test_rail_broadcast_does_not_leak_to_another_restaurant():
+    from app import api
+
+    mine, theirs = [], []
+
+    class WS:
+        def __init__(self, sink):
+            self.sink = sink
+
+        async def send_text(self, text):
+            self.sink.append(json.loads(text))
+
+    a = "aaaaaaaa-1111-1111-1111-111111111111"
+    b = "bbbbbbbb-2222-2222-2222-222222222222"
+    api._rail_watchers.setdefault(a, set()).add(WS(mine))
+    api._rail_watchers.setdefault(b, set()).add(WS(theirs))
+    try:
+        await api.broadcast_rail(a, {"type": "ticket", "order_id": "x"})
+    finally:
+        api._rail_watchers.pop(a, None)
+        api._rail_watchers.pop(b, None)
+
+    assert len(mine) == 1 and theirs == []

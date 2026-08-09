@@ -111,41 +111,50 @@ export default function Pass() {
           return;
         }
         if (e.type === "availability") void refreshMenu();
+        if (e.type === "call_started" && e.call_id) {
+          attachMonitor(e.call_id);
+          return;
+        }
+        if (e.type === "call_finished") {
+          detachMonitor();
+          return;
+        }
         void refreshRail();
       }),
     [refreshRail, refreshMenu],
   );
 
-  // Follow whichever call is live. One line of plumbing, but it is the whole
-  // reason the screen reacts while someone is still talking.
-  useEffect(() => {
-    let stop: (() => void) | undefined;
-    let cancelled = false;
+  // The rail socket announces call_started, so there is nothing to poll for.
+  // A single slow check on mount covers the case where the portal is opened
+  // while a call is already in progress.
+  const monitorStop = useRef<(() => void) | null>(null);
 
-    const attach = async () => {
-      const res = await fetch("/api/calls?limit=1");
-      const { calls } = await res.json();
-      const current = calls?.[0];
-      if (!current?.live || cancelled) return;
-      setLive(true);
-      setCallSeconds(0);
-      stop = persistentSocket(`/ws/monitor/${current.call_id}`, (raw) =>
-        handleCallEvent(raw as CallEvent),
-      );
-    };
+  const detachMonitor = useCallback(() => {
+    monitorStop.current?.();
+    monitorStop.current = null;
+    setLive(false);
+  }, []);
 
-    const poll = setInterval(() => {
-      if (!stop) void attach().catch(() => undefined);
-    }, 3000);
-    void attach().catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-      clearInterval(poll);
-      stop?.();
-    };
+  const attachMonitor = useCallback((callId: string) => {
+    monitorStop.current?.();
+    setLive(true);
+    setCallSeconds(0);
+    setFeed([]);
+    setDraft(null);
+    monitorStop.current = persistentSocket(`/ws/monitor/${callId}`, (raw) =>
+      handleCallEvent(raw as CallEvent),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    void getCalls(1)
+      .then(({ calls }) => {
+        if (calls[0]?.live && calls[0].call_id) attachMonitor(calls[0].call_id);
+      })
+      .catch(() => undefined);
+    return () => monitorStop.current?.();
+  }, [attachMonitor]);
 
   useEffect(() => {
     if (!live) return;

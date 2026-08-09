@@ -271,6 +271,9 @@ button:focus-visible,
   flex-direction: column;
   gap: 1px;
   overflow-y: auto;
+  /* Sits against the top of the band. Centring it in a tall band reads as a
+     layout accident. */
+  align-content: start;
 }
 
 .history__row {
@@ -427,10 +430,11 @@ button:focus-visible,
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 6px;
-  /* Uniform card heights with the action pinned to the bottom. Letting cards
-     size to content left the buttons at six different heights, which reads
-     as accidental rather than as a rail. */
-  align-items: stretch;
+  /* Cards are bounded rather than stretched. Stretching to fill a tall row
+     produced 700px of empty panel under a two-line order with the button
+     marooned at the bottom. A min-height keeps them even; a max-height stops
+     a long order from setting the height of the whole rail. */
+  align-items: flex-start;
   min-height: 0;
   flex: 1;
 }
@@ -442,8 +446,10 @@ button:focus-visible,
   border: 1px solid var(--steel-600);
   border-top: 3px solid var(--steel-500);
   border-radius: 3px;
-  min-width: 210px;
-  max-width: 210px;
+  min-width: 216px;
+  max-width: 216px;
+  min-height: 188px;
+  max-height: min(340px, 100%);
   padding: 12px;
   display: flex;
   flex-direction: column;

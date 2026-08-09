@@ -188,6 +188,16 @@ async def twilio_stream(ws: WebSocket, call_id: str):
                 conn, restaurant_id=tenant.id, phone_e164=routing.get("from")
             )
         live.mark_live(call_id, tenant.id)
+        # Tell any open portal a call has started, so it can attach its
+        # monitor socket immediately instead of polling to find out.
+        await broadcast_rail(
+            tenant.id,
+            {
+                "type": "call_started",
+                "call_id": call_id,
+                "from": routing.get("from"),
+            },
+        )
         instructions = prompt_mod.build(tenant, snap)
         tools = TOOL_SCHEMAS
         dispatcher = ToolDispatcher(
@@ -224,6 +234,11 @@ async def twilio_stream(ws: WebSocket, call_id: str):
         log.exception("call %s failed", call_id)
     finally:
         live.mark_ended(call_id)
+        if tenant is not None:
+            with contextlib.suppress(Exception):
+                await broadcast_rail(
+                    tenant.id, {"type": "call_finished", "call_id": call_id}
+                )
         if conversation_id:
             outcome = "error" if err else _outcome_for(dispatcher, bridge)
             with contextlib.suppress(Exception):
