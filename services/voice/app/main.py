@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 
 from fastapi import FastAPI, Form, Request, Response, WebSocket, WebSocketDisconnect
@@ -12,6 +13,7 @@ from .providers.mock import MockProvider
 from .telephony.bridge import MediaBridge
 from .telephony.twilio_webhook import connect_stream_twiml, validate_twilio_signature
 
+log = logging.getLogger(__name__)
 settings = get_settings()
 app = FastAPI(title="Restaurant AI Operator")
 
@@ -19,8 +21,33 @@ app = FastAPI(title="Restaurant AI Operator")
 _monitors: dict[str, set[WebSocket]] = {}
 
 
+def effective_provider() -> str:
+    """Which provider will actually handle the next call.
+
+    Not the same as the configured value. Asking for gemini with no API key
+    used to silently yield a mock while /health still said gemini, which is a
+    bad way to lose twenty minutes.
+    """
+    if settings.realtime_provider == "mock":
+        return "mock"
+    if settings.realtime_provider == "gemini" and not settings.gemini_api_key:
+        if settings.app_env == "prod":
+            # Falling back in production means answering real calls with a
+            # mock and reporting healthy. Fail loudly instead.
+            raise RuntimeError(
+                "REALTIME_PROVIDER=gemini but GEMINI_API_KEY is unset. "
+                "Set the key or set REALTIME_PROVIDER=mock explicitly."
+            )
+        log.warning(
+            "GEMINI_API_KEY is unset, falling back to the mock provider. "
+            "Calls will not reach a real model."
+        )
+        return "mock"
+    return settings.realtime_provider
+
+
 def build_provider():
-    if settings.realtime_provider == "mock" or not settings.gemini_api_key:
+    if effective_provider() == "mock":
         return MockProvider()
     return GeminiLiveProvider(
         api_key=settings.gemini_api_key,
@@ -31,7 +58,13 @@ def build_provider():
 
 @app.get("/health")
 async def health():
-    return {"ok": True, "provider": settings.realtime_provider}
+    """Reports the provider in use, plus the configured one when they differ."""
+    actual = effective_provider()
+    body = {"ok": True, "provider": actual}
+    if actual != settings.realtime_provider:
+        body["configured"] = settings.realtime_provider
+        body["note"] = "falling back: GEMINI_API_KEY is unset"
+    return body
 
 
 @app.post("/twilio/voice")
