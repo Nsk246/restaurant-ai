@@ -66,6 +66,26 @@ def env_file_absolute() -> bool:
     return 'env_file=".env"' not in (APP / "config.py").read_text()
 
 
+def env_dependent_tests() -> list[str]:
+    """Tests must not reload the settings module.
+
+    Settings read the developer's own .env, so such a test passes on a
+    machine without one and fails on a machine with one. That has now broken
+    the same suite four times. Test the pure function instead.
+    """
+    hits = []
+    for path in TESTS.rglob("*.py"):
+        source = path.read_text()
+        if "importlib.reload" in source and "config" in source:
+            for i, line in enumerate(source.splitlines()):
+                if "importlib.reload" in line:
+                    hits.append(f"{path.relative_to(ROOT)}:{i + 1}")
+    return hits
+
+
+reloads = env_dependent_tests()
+say("no tests reloading the settings module", not reloads, " ".join(reloads))
+
 hits = fixed_depth_parents()
 say("no fixed-depth parents[] indexing", not hits, " ".join(hits))
 

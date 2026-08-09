@@ -116,40 +116,44 @@ def test_portal_lookup_returns_none_when_not_built(tmp_path, monkeypatch):
     assert main_mod._find_portal() is None
 
 
-def test_public_base_url_is_normalised(monkeypatch):
+def test_public_base_url_is_normalised():
     """A scheme or trailing slash produces wss://host//ws/... or wss:///ws/...
-    Both connect and then go silent, with nothing in the logs to say why."""
-    import importlib
+    Both connect and then go silent, with nothing in the log to say why."""
+    from app.config import resolve_base_url
 
-    from app import config
-
-    for var in ("PUBLIC_BASE_URL", "RAILWAY_PUBLIC_DOMAIN", "FLY_APP_NAME"):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("PUBLIC_BASE_URL", "https://abc.ngrok-free.app/")
-    importlib.reload(config)
-    assert config.get_settings().public_base_url == "abc.ngrok-free.app"
+    assert resolve_base_url("https://abc.ngrok-free.app/", {}) == "abc.ngrok-free.app"
+    assert resolve_base_url("http://x.test", {}) == "x.test"
 
 
-def test_platform_hostname_is_used_when_none_is_set(monkeypatch):
-    """One less value to copy by hand, and copying it wrong is silent."""
-    import importlib
+def test_platform_hostname_is_used_when_none_is_set():
+    """One less value to copy by hand, and copying it wrong is silent.
 
-    from app import config
+    A pure function, deliberately: reloading the settings module reads the
+    developer's own .env, so this test passed on a machine without one and
+    failed on a machine with one.
+    """
+    from app.config import resolve_base_url
 
-    for var in ("PUBLIC_BASE_URL", "RAILWAY_PUBLIC_DOMAIN", "FLY_APP_NAME"):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "operator.up.railway.app")
-    importlib.reload(config)
-    assert config.get_settings().public_base_url == "operator.up.railway.app"
+    assert (
+        resolve_base_url("", {"RAILWAY_PUBLIC_DOMAIN": "operator.up.railway.app"})
+        == "operator.up.railway.app"
+    )
+    assert resolve_base_url("", {"FLY_APP_NAME": "restaurant-ai-voice"}) == (
+        "restaurant-ai-voice.fly.dev"
+    )
 
 
-def test_an_explicit_url_beats_the_platform_one(monkeypatch):
+def test_an_explicit_url_beats_the_platform_one():
     """Running against a tunnel on a deployed box must still work."""
-    import importlib
+    from app.config import resolve_base_url
 
-    from app import config
+    assert (
+        resolve_base_url("me.ngrok.app", {"RAILWAY_PUBLIC_DOMAIN": "x.railway.app"})
+        == "me.ngrok.app"
+    )
 
-    monkeypatch.setenv("PUBLIC_BASE_URL", "me.ngrok.app")
-    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "operator.up.railway.app")
-    importlib.reload(config)
-    assert config.get_settings().public_base_url == "me.ngrok.app"
+
+def test_no_hostname_anywhere_yields_empty_not_a_guess():
+    from app.config import resolve_base_url
+
+    assert resolve_base_url("", {}) == ""
