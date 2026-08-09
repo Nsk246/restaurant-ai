@@ -99,6 +99,12 @@ thought.
 `<Start><Stream>` instead of `<Connect><Stream>`. `<Start>` is listen-only.
 There is a test for this.
 
+**Codespace stuck on "Setting up your codespace".** Fixed in the devcontainer
+as of this version. The cause was `setup.sh` waiting on `pg_isready` in a base
+image that has no Postgres client: a missing command returns non-zero exactly
+like a database that is not ready, so the loop never exited. Every wait in
+setup.sh is now bounded and fails with a readable error instead of hanging.
+
 **Twilio 31920.** The WebSocket upgrade was rejected. Deploy to Fly and repoint.
 
 **Agent replies once then goes deaf.** The provider's receive iterator ended at
