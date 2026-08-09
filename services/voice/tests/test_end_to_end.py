@@ -80,3 +80,37 @@ def test_production_refuses_to_silently_fall_back(monkeypatch):
 
     with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
         main.effective_provider()
+
+
+def test_portal_lookup_survives_a_shallow_container_path(tmp_path, monkeypatch):
+    """Regression: indexing parents[3] raised IndexError at /srv/app/main.py
+    and killed the process on import, before it could serve anything.
+
+    The container layout is shallower than the repo layout, and the crash
+    happened at import time, so the app never started and the only symptom
+    was Fly reporting nothing listening on the port.
+    """
+    from app import main as main_mod
+
+    srv = tmp_path / "srv"
+    (srv / "app").mkdir(parents=True)
+    dist = srv / "web" / "portal" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("<html></html>")
+
+    fake_main = srv / "app" / "main.py"
+    fake_main.write_text("")
+    monkeypatch.setattr(main_mod, "__file__", str(fake_main))
+    found = main_mod._find_portal()
+    assert found == dist
+
+
+def test_portal_lookup_returns_none_when_not_built(tmp_path, monkeypatch):
+    """An unbuilt portal must degrade to no UI, never crash the API."""
+    from app import main as main_mod
+
+    lonely = tmp_path / "srv" / "app" / "main.py"
+    lonely.parent.mkdir(parents=True)
+    lonely.write_text("")
+    monkeypatch.setattr(main_mod, "__file__", str(lonely))
+    assert main_mod._find_portal() is None

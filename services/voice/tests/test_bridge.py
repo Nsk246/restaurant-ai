@@ -293,3 +293,46 @@ async def test_a_failing_tool_is_reported_not_crashed():
     bridge = MediaBridge(ws, provider, dispatch_tool=boom)
     await asyncio.wait_for(bridge.run(), timeout=5)
     assert "error" in provider.tool_results[0]["result"]
+
+
+@pytest.mark.asyncio
+async def test_a_hanging_provider_connect_becomes_an_error_not_silence():
+    """The worst failure mode: socket open, no exception, healthy logs, and a
+    caller hearing nothing. It must surface as an error the portal can show."""
+
+    class HangingProvider(MockProvider):
+        async def connect(self, *, instructions, tools):
+            await asyncio.sleep(30)
+
+    seen = []
+
+    async def sink(p):
+        seen.append(p)
+
+    ws = FakeTwilioWS([start_msg(), json.dumps({"event": "stop"})])
+    bridge = MediaBridge(
+        ws, HangingProvider(), on_event=sink, connect_timeout_s=0.2
+    )
+    await asyncio.wait_for(bridge.run(), timeout=5)
+
+    assert any(
+        e["type"] == "error" and "connect" in e.get("detail", "") for e in seen
+    ), seen
+
+
+@pytest.mark.asyncio
+async def test_a_failing_provider_connect_is_reported():
+    class BrokenProvider(MockProvider):
+        async def connect(self, *, instructions, tools):
+            raise RuntimeError("model not found")
+
+    seen = []
+
+    async def sink(p):
+        seen.append(p)
+
+    ws = FakeTwilioWS([start_msg(), json.dumps({"event": "stop"})])
+    bridge = MediaBridge(ws, BrokenProvider(), on_event=sink)
+    await asyncio.wait_for(bridge.run(), timeout=5)
+
+    assert any("model not found" in str(e.get("detail", "")) for e in seen), seen

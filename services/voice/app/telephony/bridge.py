@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ import numpy as np
 from .. import audio as A
 
 # Caller audio above this RMS counts as speech rather than line noise.
+log = logging.getLogger(__name__)
+
 BARGE_RMS_THRESHOLD = 550
 # Sustained speech required before we treat it as a real interruption.
 BARGE_SUSTAIN_FRAMES = 3
@@ -99,6 +102,7 @@ class MediaBridge:
         max_call_seconds: int = 600,
         dispatch_tool: Callable[[str, dict], Awaitable[dict]] | None = None,
         tool_timeout_ms: int = 1200,
+        connect_timeout_s: float = 10.0,
     ):
         self.ws = ws
         self.provider = provider
@@ -108,6 +112,7 @@ class MediaBridge:
         self.max_call_seconds = max_call_seconds
         self.dispatch_tool = dispatch_tool
         self.tool_timeout_ms = tool_timeout_ms
+        self.connect_timeout_s = connect_timeout_s
         self.tool_calls: list[dict] = []
         self._tool_tasks: set[asyncio.Task] = set()
 
@@ -344,7 +349,31 @@ class MediaBridge:
     # ------------------------------------------------------------------ run
 
     async def run(self) -> dict:
-        await self.provider.connect(instructions=self.instructions, tools=self.tools)
+        # A hanging connect is the worst failure mode here: the websocket is
+        # open, no exception is raised, the logs look healthy, and the caller
+        # hears nothing at all. Bound it so it becomes a visible error.
+        try:
+            await asyncio.wait_for(
+                self.provider.connect(
+                    instructions=self.instructions, tools=self.tools
+                ),
+                timeout=self.connect_timeout_s,
+            )
+        except TimeoutError:
+            log.error(
+                "the speech provider did not open a session within %ss; "
+                "the caller is hearing silence",
+                self.connect_timeout_s,
+            )
+            await self._emit({"type": "error", "detail": "provider connect timed out"})
+            await self.provider.close()
+            return self.stats.summary()
+        except Exception as exc:
+            log.exception("the speech provider failed to open a session")
+            await self._emit({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
+            await self.provider.close()
+            return self.stats.summary()
+        log.info("speech session open; bridging call audio")
         tasks = [
             asyncio.create_task(self._provider_to_phone()),
             asyncio.create_task(self._pace_outbound()),
