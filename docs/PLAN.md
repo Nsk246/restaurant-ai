@@ -383,7 +383,7 @@ queue.
 
 Gate: the full demo choreography runs end to end.
 
-**M3.5 — Menu management. Backend done, portal next.**
+**M3.5 — Menu management. Done.**
 The menu was seed SQL, so a price change was a deploy. Now: create, edit,
 deactivate, attach modifier groups, and import a pasted menu.
 

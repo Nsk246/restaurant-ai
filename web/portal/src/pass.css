@@ -640,3 +640,200 @@ button:focus-visible,
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ------------------------------------------------------------ menu sheet */
+
+/* Slides over the pass rather than replacing it. Editing the menu is
+   something you do between services, with the rail still visible. */
+.sheet {
+  position: fixed;
+  inset: 0;
+  background: var(--steel-900);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+.sheet__head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--steel-800);
+  border-bottom: 1px solid var(--steel-600);
+}
+
+.sheet__title {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--chit-100);
+}
+
+.sheet__count {
+  font-family: var(--data);
+  font-size: 11px;
+  color: var(--steel-300);
+}
+
+.sheet__tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.tab {
+  background: transparent;
+  border: 1px solid var(--steel-600);
+  color: var(--steel-300);
+  padding: 5px 12px;
+  border-radius: 3px;
+  font-family: var(--data);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tab--on {
+  border-color: var(--lamp-400);
+  color: var(--lamp-400);
+}
+
+.sheet__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+.sheet__error {
+  margin: 0;
+  padding: 10px 20px;
+  background: rgb(224 71 43 / 12%);
+  border-bottom: 1px solid var(--ember-500);
+  color: var(--ember-500);
+  font-size: 13px;
+}
+
+.mgroup {
+  margin-bottom: 26px;
+  max-width: 900px;
+}
+
+.mgroup__name {
+  font-family: var(--data);
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--steel-300);
+  margin: 0 0 10px;
+  font-weight: 400;
+}
+
+.mrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.mrow--off .minput--name {
+  color: var(--ember-500);
+  text-decoration: line-through;
+}
+
+.mrow--new {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--steel-700);
+  flex-wrap: wrap;
+}
+
+.minput {
+  background: var(--steel-800);
+  border: 1px solid var(--steel-600);
+  color: var(--chit-100);
+  border-radius: 2px;
+  padding: 7px 9px;
+  font-family: var(--ui);
+  font-size: 14px;
+  width: 160px;
+}
+
+.minput:focus {
+  border-color: var(--lamp-400);
+  outline: none;
+}
+
+.minput--name {
+  flex: 1;
+  min-width: 180px;
+}
+
+.minput--price {
+  width: 84px;
+  font-family: var(--data);
+  text-align: right;
+}
+
+/* The code is what the agent says back in a tool call. Worth seeing while
+   editing, since renaming deliberately does not change it. */
+.mcode {
+  font-family: var(--data);
+  font-size: 10px;
+  color: var(--steel-500);
+  width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn--tiny {
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
+.btn--danger:hover {
+  border-color: var(--ember-500);
+  color: var(--ember-500);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn:disabled:hover {
+  border-color: var(--steel-500);
+  color: var(--steel-200);
+}
+
+.mpaste {
+  width: 100%;
+  max-width: 900px;
+  background: var(--steel-800);
+  border: 1px solid var(--steel-600);
+  color: var(--chit-100);
+  border-radius: 2px;
+  padding: 12px;
+  font-family: var(--data);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.mpaste:focus {
+  border-color: var(--lamp-400);
+  outline: none;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--steel-300);
+  max-width: 900px;
+}
+
+.hint--warn {
+  color: var(--lamp-400);
+}

@@ -362,3 +362,24 @@ async def test_replace_deactivates_the_existing_menu(admin):
                 "UPDATE menu_items SET is_active=true WHERE id = ANY($1::uuid[])",
                 before,
             )
+
+
+async def test_aliases_never_just_repeat_the_dish_name(admin):
+    """Aliases exist because nobody asks for "Grilled Salmon" on the phone,
+    they ask for "the salmon". An alias equal to the name matches nothing
+    extra and is prompt weight on every call."""
+    from app.menu_import import ParsedItem, clean_aliases
+
+    cleaned = clean_aliases(
+        [
+            ParsedItem(
+                name="Grilled Salmon",
+                aliases=["Grilled Salmon", "the salmon", "salmon", "SALMON"],
+            ),
+            ParsedItem(name="Calamari", aliases=["Calamari"]),
+        ]
+    )
+    assert "grilled salmon" not in cleaned[0].aliases
+    assert "salmon" in cleaned[0].aliases
+    assert cleaned[0].aliases.count("salmon") == 1, "case-insensitive dedupe"
+    assert cleaned[1].aliases == [], "nothing shorter to say than Calamari"

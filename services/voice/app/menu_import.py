@@ -28,13 +28,18 @@ Return ONLY a JSON array. No prose, no markdown fences. Each element:
   price         a number in dollars, or null if none is given
   description   the descriptive line, or null
   tags          any of: vegan, vegetarian, gluten_free, contains_nuts, spicy
-  aliases       what a caller would say out loud, e.g. "the burger"
+  aliases       ONLY shorter or informal ways a caller says it on the phone.
+                Never repeat the full name: it is already matched.
+                "Grilled Salmon" -> ["salmon", "the salmon"]
+                "Nashville Hot Chicken" -> ["hot chicken", "the chicken"]
+                "Calamari" -> [] (nothing shorter to say)
 
 Rules:
 - Section headers are categories, never items.
 - "add X +$2" style lines are modifiers, not items. Skip them.
 - If a price is missing, use null rather than guessing.
 - Keep names exactly as written. Do not tidy them.
+- Leave aliases empty rather than padding them with the name again.
 
 TEXT:
 """
@@ -117,6 +122,32 @@ async def parse_with_model(text: str, api_key: str, model: str) -> list[ParsedIt
     except Exception as exc:
         log.warning("model parse failed (%s); falling back to rules", exc)
     return parse_plain(text)
+
+
+def clean_aliases(items: list[ParsedItem]) -> list[ParsedItem]:
+    """Drop aliases that just repeat the dish name.
+
+    Aliases exist because nobody phones up and asks for "Grilled Salmon";
+    they ask for "the salmon". An alias identical to the name matches nothing
+    the name would not already match, and it is prompt weight on every call.
+    """
+    for item in items:
+        name = item.name.strip().lower()
+        kept: list[str] = []
+        seen: set[str] = set()
+        for raw in item.aliases:
+            alias = raw.strip()
+            key = alias.lower()
+            # Case-insensitive: "salmon" and "SALMON" match identically at
+            # lookup time, so keeping both is pure prompt weight.
+            if not alias or key == name or key in seen:
+                continue
+            if len(alias) >= len(item.name):
+                continue
+            seen.add(key)
+            kept.append(alias.lower())
+        item.aliases = kept
+    return items
 
 
 def dedupe(items: list[ParsedItem]) -> list[ParsedItem]:

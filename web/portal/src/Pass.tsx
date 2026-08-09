@@ -9,6 +9,7 @@ import {
   resetDemo,
   setAvailability,
 } from "./api";
+import MenuEditor from "./MenuEditor";
 import type {
   CallEvent,
   CallRow,
@@ -71,6 +72,7 @@ export default function Pass() {
   const [latency, setLatency] = useState<number | null>(null);
   const [callSeconds, setCallSeconds] = useState(0);
   const [history, setHistory] = useState<CallRow[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
   const now = useNow();
   const feedRef = useRef<HTMLDivElement>(null);
   const railLoadedAt = useRef(Date.now());
@@ -293,6 +295,14 @@ export default function Pass() {
 
   return (
     <div className="pass">
+      {menuOpen && (
+        <MenuEditor
+          onClose={() => {
+            setMenuOpen(false);
+            void refreshMenu();
+          }}
+        />
+      )}
       <header className="status">
         <span className="status__name">{restaurant?.name ?? "\u2014"}</span>
         <span className="status__phone">{restaurant?.phone}</span>
@@ -313,6 +323,9 @@ export default function Pass() {
         <span className="status__metric">
           on the rail <b>{tickets.length}</b>
         </span>
+        <button className="btn" onClick={() => setMenuOpen(true)}>
+          Menu
+        </button>
         <button
           className="btn"
           onClick={() => {

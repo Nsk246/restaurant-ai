@@ -296,7 +296,7 @@ async def preview_import(body: ImportIn) -> dict[str, Any]:
         items = menu_import.parse_plain(body.text)
         source = "rules"
 
-    items = menu_import.dedupe(items)
+    items = menu_import.clean_aliases(menu_import.dedupe(items))
     return {
         "source": source,
         "count": len(items),

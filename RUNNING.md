@@ -59,6 +59,21 @@ Save. This has to be redone whenever the ngrok URL changes.
 
 **6. Open the portal** at port 8000 and call.
 
+## Putting a real menu in
+
+Open the portal, press **Menu**, then **Import**. Paste whatever the
+restaurant has: a copy-pasted PDF, an email, a transcribed photo. It proposes
+structured items with prices and sections; correct anything wrong, then press
+import. Nothing is written until you do.
+
+Tick **Replace the current menu** to put a real menu in over the sample one.
+That deactivates the existing items rather than deleting them, so past orders
+still resolve their line items.
+
+The **Edit** tab does day-to-day work: change a price inline, 86 an item,
+add a special. The code beside each dish is what the agent emits in a tool
+call, and renaming deliberately does not change it.
+
 ## Tickets without a phone call
 
     cd services/voice && python tools/seed_demo_calls.py --count 8
