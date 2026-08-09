@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     # Minimal thinking is the default for the lowest time-to-first-audio,
     # which is the number this whole product is judged on.
     gemini_thinking_level: str = "minimal"
+    # Silence before the model treats a turn as finished. Added to every turn.
+    gemini_end_of_speech_ms: int = 500
     gemini_voice: str = "Aoede"
 
     tool_timeout_ms: int = 1200

@@ -28,11 +28,17 @@ class GeminiLiveProvider:
         model: str,
         voice: str = "Aoede",
         thinking_level: str = "minimal",
+        end_of_speech_silence_ms: int = 500,
     ):
         self.api_key = api_key
         self.model = model
         self.voice = voice
         self.thinking_level = thinking_level
+        # How long the model waits in silence before deciding the caller has
+        # finished. This is added to every single turn, so the default is a
+        # large share of perceived latency. Too low and it interrupts people
+        # who pause mid-sentence; 400-600ms is the usable range on a phone.
+        self.end_of_speech_silence_ms = end_of_speech_silence_ms
         self._session = None
         self._ctx = None
         self._closed = False
@@ -52,6 +58,12 @@ class GeminiLiveProvider:
         }
         if tools:
             config["tools"] = [{"function_declarations": tools}]
+        if self.end_of_speech_silence_ms:
+            config["realtime_input_config"] = {
+                "automatic_activity_detection": {
+                    "silence_duration_ms": self.end_of_speech_silence_ms,
+                }
+            }
         if self.thinking_level:
             # Lower thinking means faster first audio. On a phone call the
             # caller hears the delay, so this is not a free knob.

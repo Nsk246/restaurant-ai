@@ -56,7 +56,7 @@ class TurnTiming:
     """One turn's latency, for the M1 harness."""
 
     caller_stopped_at: float | None = None
-    last_audio_sent_at: float | None = None
+    last_speech_sent_at: float | None = None
     agent_first_audio_at: float | None = None
 
     @property
@@ -70,10 +70,9 @@ class TurnTiming:
 class CallStats:
     turns: list[int] = field(default_factory=list)
     barge_ins: int = 0
-    # Time from the last caller audio we forwarded to the model's first audio
-    # back. Total response time minus this is transport: Twilio, any tunnel,
-    # and our own processing. Without the split you cannot tell a slow model
-    # from a slow network, and they need different fixes.
+    # Time from the last speech-bearing frame we forwarded to the model's
+    # first audio back. This includes the model's own end-of-speech wait,
+    # which is the dominant term and is configurable.
     model_rtt: list[int] = field(default_factory=list)
 
     def record(self, ms: int | None) -> None:
@@ -255,7 +254,11 @@ class MediaBridge:
                 await self.provider.send_audio(
                     A.resample(samples, 8000, self.provider.input_hz).tobytes()
                 )
-                self._turn.last_audio_sent_at = time.time()
+                # Only speech-bearing frames. Stamping every frame, silence
+                # included, measured the gap to the most recent silent packet
+                # and reported a meaningless single-digit millisecond figure.
+                if rms > BARGE_RMS_THRESHOLD:
+                    self._turn.last_speech_sent_at = time.time()
 
             elif event == "stop":
                 break
@@ -280,12 +283,12 @@ class MediaBridge:
                         self._turn.agent_first_audio_at = time.time()
                         ms = self._turn.response_ms
                         self.stats.record(ms)
-                        if self._turn.last_audio_sent_at is not None:
+                        if self._turn.last_speech_sent_at is not None:
                             self.stats.model_rtt.append(
                                 int(
                                     (
                                         self._turn.agent_first_audio_at
-                                        - self._turn.last_audio_sent_at
+                                        - self._turn.last_speech_sent_at
                                     )
                                     * 1000
                                 )

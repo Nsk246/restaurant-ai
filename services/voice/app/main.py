@@ -118,6 +118,7 @@ def build_provider():
         model=settings.gemini_live_model,
         voice=settings.gemini_voice,
         thinking_level=settings.gemini_thinking_level,
+        end_of_speech_silence_ms=settings.gemini_end_of_speech_ms,
     )
 
 
@@ -283,13 +284,6 @@ async def twilio_stream(ws: WebSocket, call_id: str):
                         transferred=bool(dispatcher and dispatcher.transfer_requested),
                         error_detail=err,
                     )
-        log.warning(
-            "CALL DONE turns=%s  total_p50=%sms  model_p50=%sms  transport_p50=%sms",
-            summary.get("turn_count"),
-            summary.get("p50_response_ms"),
-            summary.get("p50_model_ms"),
-            summary.get("p50_transport_ms"),
-        )
         await fan_out({"type": "call_ended", **summary})
 
 
