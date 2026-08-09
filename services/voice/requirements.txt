@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+websockets>=13
+numpy>=2.0
+scipy>=1.14
+pydantic-settings>=2.6
+twilio>=9.3
+asyncpg>=0.30
+redis>=5.2
+google-genai>=0.8
+python-multipart>=0.0.12

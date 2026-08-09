@@ -1,0 +1,12 @@
+target-version = "py312"
+line-length = 90
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "S", "RUF"]
+ignore = ["S101"]  # assert is how tests are written
+
+[lint.isort]
+known-first-party = ["app"]
+
+[lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]  # test credentials are not secrets

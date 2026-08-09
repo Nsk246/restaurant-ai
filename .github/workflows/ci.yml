@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: operator
+          POSTGRES_PASSWORD: operator
+          POSTGRES_DB: operator
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations and seed
+        env:
+          PGPASSWORD: operator
+        run: |
+          for f in db/migrations/*.sql db/seed/*.sql; do
+            psql -h localhost -U operator -d operator -q -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - name: Schema assertions
+        env:
+          PGPASSWORD: operator
+        run: |
+          psql -h localhost -U operator -d operator -q -v ON_ERROR_STOP=1 \
+            -f db/tests/test_schema.sql 2>&1 | sed 's/^.*NOTICE:  //'
+
+  voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r services/voice/requirements.txt pytest pytest-asyncio ruff
+      - run: ruff check services/voice
+      - run: cd services/voice && python -m pytest -q
