@@ -28,7 +28,7 @@ from .agent import session as session_mod
 from .agent.tools import TOOL_SCHEMAS, ToolDispatcher
 from .api import broadcast_rail
 from .api import router as api_router
-from .config import get_settings
+from .config import get_settings, log_config_source
 from .kitchen import InternalKDS
 from .providers.gemini import GeminiLiveProvider
 from .providers.mock import MockProvider
@@ -45,6 +45,20 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    logging.basicConfig(level=logging.INFO)
+    log.info("config from %s", log_config_source())
+    log.info(
+        "provider=%s  public_base_url=%r  signature_validation=%s",
+        settings.realtime_provider,
+        settings.public_base_url,
+        settings.twilio_validate_signature,
+    )
+    if not settings.public_base_url:
+        log.error(
+            "PUBLIC_BASE_URL is empty. The stream URL handed to Twilio will "
+            "be wss:///ws/twilio/... with no host, and the call will connect "
+            "and then go silent."
+        )
     # Suppressed on purpose: the service must still boot without a database so
     # /health can report the outage rather than the container crash-looping.
     with contextlib.suppress(Exception):
@@ -269,6 +283,13 @@ async def twilio_stream(ws: WebSocket, call_id: str):
                         transferred=bool(dispatcher and dispatcher.transfer_requested),
                         error_detail=err,
                     )
+        log.warning(
+            "CALL DONE turns=%s  total_p50=%sms  model_p50=%sms  transport_p50=%sms",
+            summary.get("turn_count"),
+            summary.get("p50_response_ms"),
+            summary.get("p50_model_ms"),
+            summary.get("p50_transport_ms"),
+        )
         await fan_out({"type": "call_ended", **summary})
 
 

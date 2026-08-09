@@ -56,6 +56,7 @@ class TurnTiming:
     """One turn's latency, for the M1 harness."""
 
     caller_stopped_at: float | None = None
+    last_audio_sent_at: float | None = None
     agent_first_audio_at: float | None = None
 
     @property
@@ -69,6 +70,11 @@ class TurnTiming:
 class CallStats:
     turns: list[int] = field(default_factory=list)
     barge_ins: int = 0
+    # Time from the last caller audio we forwarded to the model's first audio
+    # back. Total response time minus this is transport: Twilio, any tunnel,
+    # and our own processing. Without the split you cannot tell a slow model
+    # from a slow network, and they need different fixes.
+    model_rtt: list[int] = field(default_factory=list)
 
     def record(self, ms: int | None) -> None:
         if ms is not None and ms >= 0:
@@ -80,10 +86,20 @@ class CallStats:
         return int(np.percentile(self.turns, p))
 
     def summary(self) -> dict[str, Any]:
+        model_p50 = (
+            int(np.percentile(self.model_rtt, 50)) if self.model_rtt else None
+        )
+        total_p50 = self.percentile(50)
         return {
             "turn_count": len(self.turns),
-            "p50_response_ms": self.percentile(50),
+            "p50_response_ms": total_p50,
             "p95_response_ms": self.percentile(95),
+            "p50_model_ms": model_p50,
+            "p50_transport_ms": (
+                total_p50 - model_p50
+                if total_p50 is not None and model_p50 is not None
+                else None
+            ),
             "barge_ins": self.barge_ins,
         }
 
@@ -239,6 +255,7 @@ class MediaBridge:
                 await self.provider.send_audio(
                     A.resample(samples, 8000, self.provider.input_hz).tobytes()
                 )
+                self._turn.last_audio_sent_at = time.time()
 
             elif event == "stop":
                 break
@@ -263,6 +280,16 @@ class MediaBridge:
                         self._turn.agent_first_audio_at = time.time()
                         ms = self._turn.response_ms
                         self.stats.record(ms)
+                        if self._turn.last_audio_sent_at is not None:
+                            self.stats.model_rtt.append(
+                                int(
+                                    (
+                                        self._turn.agent_first_audio_at
+                                        - self._turn.last_audio_sent_at
+                                    )
+                                    * 1000
+                                )
+                            )
                         if ms is not None:
                             await self._emit({"type": "latency", "ms": ms})
                 ulaw = A.model_to_phone(ev.audio, self.provider.output_hz)
@@ -335,8 +362,18 @@ class MediaBridge:
             await self._emit({"type": "error", "detail": f"tool result: {exc}"})
 
     async def _pace_outbound(self) -> None:
-        """Send queued frames at wall-clock speed so `clear` can interleave."""
-        interval = FRAME_MS / 1000
+        """Forward agent audio to Twilio as fast as it arrives.
+
+        This used to send one 20ms frame then sleep 20ms. That looks like
+        correct real-time pacing and is not: asyncio.sleep overshoots by a
+        millisecond or two every iteration, so a five second reply drifts
+        several hundred milliseconds late, and the backlog compounds across
+        turns until later replies feel like they never came.
+
+        Pacing was never needed. Twilio buffers inbound media and plays it
+        out itself, and barge-in works by flushing that buffer with `clear`,
+        not by us withholding frames.
+        """
         while not self._closing:
             try:
                 frame = await asyncio.wait_for(self._outbound.get(), timeout=0.1)
@@ -344,7 +381,14 @@ class MediaBridge:
                 continue
             await self._send_to_twilio(frame)
             self._spoken_this_turn = self._pending_this_turn
-            await asyncio.sleep(interval)
+            # Drain whatever else is ready without waiting on the clock.
+            while True:
+                try:
+                    await self._send_to_twilio(self._outbound.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            # Yield so the inbound pump and tool tasks are not starved.
+            await asyncio.sleep(0)
 
     async def _watchdog(self) -> None:
         """Hard cap on call length. A runaway call is a runaway bill."""

@@ -54,6 +54,11 @@ def get_settings() -> Settings:
 
 
 def log_config_source() -> str:
-    """Which .env was read, and whether it existed."""
+    """Which .env was read, and whether it existed.
+
+    An env file that silently is not found looks identical to one with every
+    value left at its default, which is how a real call ends up answered by
+    the mock provider.
+    """
     path = Path(Settings.model_config["env_file"])
     return f"{path} ({'found' if path.is_file() else 'MISSING'})"
