@@ -9,4 +9,7 @@ ignore = ["S101"]  # assert is how tests are written
 known-first-party = ["app"]
 
 [lint.per-file-ignores]
+# The system prompt is prose the model reads. Rewrapping it to satisfy a
+# linter would change what the agent is told.
+"app/agent/prompt.py" = ["E501"]
 "tests/*" = ["S105", "S106"]  # test credentials are not secrets

@@ -1,0 +1,475 @@
+"""Order accuracy suite. This is the M2 gate.
+
+Runs against a real Postgres with the real seed, through the same dispatcher
+the model calls. Skipped automatically if no database is reachable, so the
+unit suite still runs anywhere.
+
+The scenarios are the ones that actually go wrong on the phone: modifiers,
+mid-order changes, 86'd items, required choices the caller skipped, repeated
+confirmations, and callers who say yes before hearing the order back.
+"""
+
+from __future__ import annotations
+
+import os
+import uuid
+
+import asyncpg
+import pytest
+
+from app.agent import menu as menu_mod
+from app.agent import orders
+from app.agent import session as session_mod
+from app.agent.tools import ToolDispatcher
+from app.kitchen import InternalKDS
+
+DSN = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql://operator:operator@127.0.0.1:5432/operator"
+)
+PILOT_NUMBER = "+16155550111"
+
+pytestmark = pytest.mark.asyncio
+
+
+async def _pool():
+    try:
+        return await asyncpg.create_pool(DSN, min_size=1, max_size=4, timeout=3)
+    except Exception:
+        pytest.skip("no database reachable")
+
+
+@pytest.fixture
+async def kit():
+    pool = await _pool()
+    async with pool.acquire() as conn:
+        tenant = await menu_mod.resolve_tenant(conn, PILOT_NUMBER)
+        if tenant is None:
+            pytest.skip("pilot tenant not seeded")
+        snap = await menu_mod.snapshot(conn, tenant.id)
+    fired: list[dict] = []
+
+    class Sink(InternalKDS):
+        async def fire(self, order_id, ticket):
+            fired.append(ticket)
+
+    async def make(conv: str | None = None):
+        # Orders reference a conversation, exactly as they do on a real call.
+        async with pool.acquire() as c:
+            conv_id = await session_mod.open_conversation(
+                c,
+                restaurant_id=tenant.id,
+                channel="phone",
+                external_id=conv or f"test-{uuid.uuid4()}",
+                from_e164="+16155559999",
+            )
+        return ToolDispatcher(
+            pool, tenant=tenant, menu=snap, conversation_id=conv_id, kitchen=Sink()
+        )
+
+    yield {"make": make, "menu": snap, "tenant": tenant, "pool": pool, "fired": fired}
+    await pool.close()
+
+
+def item_id(menu, name):
+    for cat in menu:
+        for it in cat["items"]:
+            if it["name"] == name:
+                return it["id"]
+    raise AssertionError(f"{name} not in snapshot")
+
+
+def modifier_id(menu, item_name, mod_name):
+    for cat in menu:
+        for it in cat["items"]:
+            if it["name"] == item_name:
+                for g in it.get("modifier_groups", []):
+                    for o in g["options"]:
+                        if o["name"] == mod_name:
+                            return o["id"]
+    raise AssertionError(f"{mod_name} not a modifier of {item_name}")
+
+
+# --------------------------------------------------------------- the basics
+
+
+async def test_tenant_resolves_from_the_dialled_number(kit):
+    assert kit["tenant"].name == "Broadway Kitchen"
+
+
+async def test_snapshot_contains_ids_prices_and_aliases(kit):
+    burger = None
+    for cat in kit["menu"]:
+        for it in cat["items"]:
+            if it["name"] == "Smash Burger":
+                burger = it
+    assert burger and burger["price"] == 16.50
+    assert "burger" in burger["aliases"]
+
+
+async def test_simple_order_reaches_the_kitchen(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch(
+        "add_item", {"menu_item_id": item_id(kit["menu"], "Smash Burger"), "quantity": 2}
+    )
+    assert "error" not in r
+    await d.dispatch("review_order", {})
+    out = await d.dispatch("confirm_order", {"customer_name": "Sam"})
+    assert out["order_number"] >= 1
+    assert kit["fired"], "nothing reached the kitchen"
+    assert kit["fired"][-1]["lines"][0]["quantity"] == 2
+
+
+async def test_totals_include_modifiers_and_tax(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Smash Burger"),
+            "quantity": 1,
+            "modifier_ids": [modifier_id(kit["menu"], "Smash Burger", "Bacon")],
+        },
+    )
+    rev = await d.dispatch("review_order", {})
+    # 16.50 + 2.50 bacon = 19.00, tax 9.25% floor = 1.75, total 20.75
+    assert rev["total"] == pytest.approx(20.75, abs=0.01)
+
+
+async def test_note_is_carried_to_the_kitchen_verbatim(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Smash Burger"),
+            "note": "no pickles, extra sauce on the side",
+        },
+    )
+    await d.dispatch("review_order", {})
+    await d.dispatch("confirm_order", {})
+    assert kit["fired"][-1]["lines"][0]["note"] == "no pickles, extra sauce on the side"
+
+
+# ------------------------------------------------- the ways callers actually talk
+
+
+async def test_caller_changes_quantity_mid_order(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch(
+        "add_item", {"menu_item_id": item_id(kit["menu"], "Fries"), "quantity": 1}
+    )
+    await d.dispatch("change_quantity", {"line_id": r["line_id"], "quantity": 3})
+    rev = await d.dispatch("review_order", {})
+    assert rev["lines"][0]["quantity"] == 3
+
+
+async def test_caller_removes_an_item(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    a = await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Sweet Tea"),
+            "modifier_ids": [modifier_id(kit["menu"], "Sweet Tea", "Large")],
+        },
+    )
+    await d.dispatch("change_quantity", {"line_id": a["line_id"], "quantity": 0})
+    rev = await d.dispatch("review_order", {})
+    assert len(rev["lines"]) == 1
+
+
+async def test_find_item_matches_what_people_say_out_loud(kit):
+    d = await kit["make"]()
+    r = await d.dispatch("find_item", {"query": "the wings"})
+    assert r["candidates"] and r["candidates"][0]["name"] == "Nashville Hot Wings"
+
+
+async def test_find_item_returns_nothing_for_a_dish_we_do_not_have(kit):
+    d = await kit["make"]()
+    r = await d.dispatch("find_item", {"query": "pad thai"})
+    assert r["candidates"] == []
+
+
+async def test_spoken_summary_is_readable_aloud(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken"),
+            "quantity": 2,
+            "modifier_ids": [modifier_id(kit["menu"], "Nashville Hot Chicken", "Hot")],
+        },
+    )
+    rev = await d.dispatch("review_order", {})
+    s = rev["spoken_summary"]
+    assert "2 Nashville Hot Chicken" in s and "Hot" in s and "Total" in s
+
+
+# ------------------------------------------------------------- the guardrails
+
+
+async def test_model_cannot_invent_a_menu_item(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch("add_item", {"menu_item_id": str(uuid.uuid4())})
+    assert "error" in r and "not on the menu" in r["error"]
+
+
+async def test_cannot_sell_an_86d_item(kit):
+    pool = kit["pool"]
+    iid = item_id(kit["menu"], "Fries")
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE menu_items SET is_available=false WHERE id=$1", iid)
+    try:
+        d = await kit["make"]()
+        await d.dispatch("start_order", {"order_type": "pickup"})
+        r = await d.dispatch("add_item", {"menu_item_id": iid})
+        assert "error" in r and "out of" in r["error"]
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE menu_items SET is_available=true WHERE id=$1", iid)
+
+
+async def test_86d_item_disappears_from_the_snapshot_entirely(kit):
+    pool = kit["pool"]
+    iid = item_id(kit["menu"], "Pecan Pie")
+    async with pool.acquire() as conn:
+        try:
+            await conn.execute(
+                "UPDATE menu_items SET is_available=false WHERE id=$1", iid
+            )
+            snap = await menu_mod.snapshot(conn, kit["tenant"].id)
+        finally:
+            await conn.execute("UPDATE menu_items SET is_available=true WHERE id=$1", iid)
+    names = [it["name"] for cat in snap for it in cat["items"]]
+    assert "Pecan Pie" not in names
+
+
+async def test_required_choice_must_be_made(kit):
+    """Hot chicken needs a heat level. Skipping it prompts rather than guesses."""
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch(
+        "add_item", {"menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken")}
+    )
+    # The error is the group's own prompt, so it can be spoken verbatim.
+    assert "error" in r and "hot" in r["error"].lower()
+
+
+async def test_modifier_from_another_item_is_rejected(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Smash Burger"),
+            "modifier_ids": [modifier_id(kit["menu"], "Ribeye", "Medium rare")],
+        },
+    )
+    assert "error" in r
+
+
+async def test_too_many_choices_in_a_single_select_group_rejected(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken"),
+            "modifier_ids": [
+                modifier_id(kit["menu"], "Nashville Hot Chicken", "Mild"),
+                modifier_id(kit["menu"], "Nashville Hot Chicken", "Hot"),
+            ],
+        },
+    )
+    assert "error" in r and "at most" in r["error"]
+
+
+async def test_confirm_without_reading_back_is_refused(kit):
+    """The readback is not a prompt instruction. It is enforced."""
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    r = await d.dispatch("confirm_order", {})
+    assert "error" in r and "read the order back" in r["error"]
+
+
+async def test_adding_an_item_invalidates_a_previous_readback(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch("review_order", {})
+    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Cornbread")})
+    r = await d.dispatch("confirm_order", {})
+    assert "error" in r, "order changed after readback but confirmed anyway"
+
+
+async def test_empty_order_cannot_be_confirmed(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch("review_order", {})
+    r = await d.dispatch("confirm_order", {})
+    assert "error" in r
+
+
+async def test_confirming_twice_does_not_fire_two_tickets(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Cornbread")})
+    await d.dispatch("review_order", {})
+    before = len(kit["fired"])
+    first = await d.dispatch("confirm_order", {})
+    second = await d.dispatch("confirm_order", {})
+    assert first["order_number"] == second["order_number"]
+    assert len(kit["fired"]) == before + 1, "double-fired to the kitchen"
+
+
+async def test_start_order_twice_reuses_the_same_draft(kit):
+    d = await kit["make"]()
+    a = await d.dispatch("start_order", {"order_type": "pickup"})
+    b = await d.dispatch("start_order", {"order_type": "pickup"})
+    assert a["order_id"] == b["order_id"]
+
+
+async def test_dine_in_requires_a_table(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "dine_in"})
+    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch("review_order", {})
+    r = await d.dispatch("confirm_order", {})
+    assert "error" in r, "dine-in confirmed with no table"
+
+
+async def test_dine_in_succeeds_with_a_table(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "dine_in"})
+    await d.dispatch("add_item", {"menu_item_id": item_id(kit["menu"], "Fries")})
+    await d.dispatch("review_order", {})
+    r = await d.dispatch("confirm_order", {"table_label": "12"})
+    assert r.get("order_number")
+
+
+async def test_transfer_returns_the_restaurants_real_number(kit):
+    d = await kit["make"]()
+    r = await d.dispatch("transfer_to_human", {"reason": "caller asked"})
+    assert r["transferring"] and r["to"] == "+16155550100"
+
+
+async def test_unknown_tool_is_an_error_not_a_crash(kit):
+    d = await kit["make"]()
+    assert "error" in await d.dispatch("order_a_pizza", {})
+
+
+async def test_menu_edit_does_not_rewrite_a_fired_order(kit):
+    """Prices are snapshotted on the line. Tonight's order stays tonight's price."""
+    pool = kit["pool"]
+    iid = item_id(kit["menu"], "Cornbread")
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch("add_item", {"menu_item_id": iid})
+    await d.dispatch("review_order", {})
+    out = await d.dispatch("confirm_order", {})
+    async with pool.acquire() as conn:
+        # Capture the real price rather than hardcoding it. A failed run that
+        # restores the wrong value silently poisons every later run.
+        original = await conn.fetchval(
+            "SELECT price_cents FROM menu_items WHERE id=$1", iid
+        )
+        try:
+            await conn.execute("UPDATE menu_items SET price_cents=9999 WHERE id=$1", iid)
+            total = await conn.fetchval(
+                "SELECT total_cents FROM orders WHERE order_number=$1"
+                " AND business_date=CURRENT_DATE",
+                out["order_number"],
+            )
+        finally:
+            await conn.execute(
+                "UPDATE menu_items SET price_cents=$2 WHERE id=$1", iid, original
+            )
+    assert total < 1000, "a later menu edit rewrote a fired order"
+
+
+async def test_order_lands_in_the_database_exactly_as_spoken(kit):
+    """The end-to-end check: what the caller said is what the kitchen gets."""
+    pool = kit["pool"]
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Nashville Hot Chicken"),
+            "quantity": 2,
+            "modifier_ids": [
+                modifier_id(kit["menu"], "Nashville Hot Chicken", "Extra Hot")
+            ],
+            "note": "no pickles",
+        },
+    )
+    await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Mac and Cheese"),
+            "quantity": 1,
+        },
+    )
+    await d.dispatch("review_order", {})
+    out = await d.dispatch("confirm_order", {"customer_name": "Priya"})
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT oi.name_snapshot, oi.quantity, oi.special_instructions,
+                   ARRAY_AGG(m.name_snapshot) FILTER (WHERE m.id IS NOT NULL) AS mods
+            FROM orders o JOIN order_items oi ON oi.order_id = o.id
+            LEFT JOIN order_item_modifiers m ON m.order_item_id = oi.id
+            WHERE o.order_number=$1 AND o.business_date=CURRENT_DATE
+            GROUP BY oi.id ORDER BY oi.position
+            """,
+            out["order_number"],
+        )
+        status = await conn.fetchval(
+            "SELECT status FROM orders WHERE order_number=$1"
+            " AND business_date=CURRENT_DATE",
+            out["order_number"],
+        )
+
+    assert status == "fired"
+    assert rows[0]["name_snapshot"] == "Nashville Hot Chicken"
+    assert rows[0]["quantity"] == 2
+    assert rows[0]["special_instructions"] == "no pickles"
+    assert rows[0]["mods"] == ["Extra Hot"]
+    assert rows[1]["name_snapshot"] == "Mac and Cheese"
+
+
+async def test_order_error_messages_are_speakable(kit):
+    """These strings get read aloud to a customer. No stack traces, no jargon."""
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch("add_item", {"menu_item_id": str(uuid.uuid4())})
+    msg = r["error"]
+    assert msg == msg.lower() or msg[0].isupper()
+    assert "Traceback" not in msg and "psycopg" not in msg and "asyncpg" not in msg
+
+
+async def test_quote_uses_integer_money_throughout(kit):
+    """A float cent is a rounding bug waiting for a busy Friday."""
+    pool = kit["pool"]
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch(
+        "add_item",
+        {
+            "menu_item_id": item_id(kit["menu"], "Sweet Tea"),
+            "modifier_ids": [modifier_id(kit["menu"], "Sweet Tea", "Large")],
+            "quantity": 3,
+        },
+    )
+    async with pool.acquire() as conn:
+        q = await orders.quote(conn, order_id=d.order_id)
+    assert isinstance(q.subtotal_cents, int)
+    assert isinstance(q.tax_cents, int)
+    assert q.total_cents == q.subtotal_cents + q.tax_cents

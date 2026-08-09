@@ -7,8 +7,9 @@ tool layer that neither adapter owns.
 ## Status
 
 - **M0 Data foundation — done.** Schema, order state machine, menu snapshot, seed.
-- M1 Media bridge: Twilio inbound to realtime model, barge-in, latency harness.
-- M2 Tool layer and ordering.
+- **M1 Media bridge — done.** Twilio bridge, mu-law codec, barge-in, latency harness.
+- **M2 Tool layer and ordering — done.** Tenant routing, menu injection, constrained
+  tools, enforced readback, idempotent confirmation.
 - M3 SMS confirmation and kitchen display.
 - M4 Reservations, hours, FAQ.
 - M5 Human transfer and failure paths.
@@ -34,6 +35,12 @@ cannot bypass them.
 - **No illegal order states.** A trigger enforces the transition graph. An order
   cannot skip from draft straight to fired, and a completed order cannot be
   revived. Every transition is logged to `order_events` automatically.
+- **No confirming an order the caller never heard.** `confirm_order` refuses
+  until `review_order` has run, and any change to the order invalidates a
+  previous readback. This is enforced in the dispatcher, not asked for in the
+  prompt.
+- **No invented dishes.** `add_item` accepts menu uuids only, validated against
+  the tenant's own menu. A modifier belonging to a different item is rejected.
 - **No selling what is 86'd.** `v_sellable_menu` filters on `is_available`, so
   an out-of-stock item is absent from the agent's context entirely rather than
   being something the prompt has to remember to avoid.

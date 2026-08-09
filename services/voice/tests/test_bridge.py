@@ -3,6 +3,7 @@
 No network, no API key, no phone. These are the tests that have to hold for
 the demo not to embarrass anyone.
 """
+
 import asyncio
 import base64
 import json
@@ -74,7 +75,8 @@ async def test_agent_audio_reaches_twilio_as_ulaw_frames():
 async def test_receive_loop_survives_turn_boundaries():
     """The deafness regression: a turn_end must not end the receive loop."""
     ws = FakeTwilioWS(
-        [start_msg()] + [media_msg(quiet()) for _ in range(20)]
+        [start_msg()]
+        + [media_msg(quiet()) for _ in range(20)]
         + [json.dumps({"event": "stop"})]
     )
     provider = MockProvider(
@@ -205,3 +207,89 @@ async def test_caller_audio_is_resampled_to_provider_rate():
     assert provider.sent_audio
     got = np.frombuffer(provider.sent_audio[0], dtype=np.int16)
     assert len(got) == 320, "160 samples at 8kHz must become 320 at 16kHz"
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_are_executed_and_results_returned_to_the_model():
+    calls = []
+
+    async def dispatch(name, args):
+        calls.append((name, args))
+        return {"order_number": 7}
+
+    ws = FakeTwilioWS(
+        [start_msg()]
+        + [media_msg(quiet()) for _ in range(20)]
+        + [json.dumps({"event": "stop"})]
+    )
+    provider = MockProvider(
+        [
+            ProviderEvent(
+                kind="tool_call",
+                tool_call_id="fc1",
+                tool_name="add_item",
+                tool_args={"quantity": 2},
+            )
+        ]
+    )
+    bridge = MediaBridge(ws, provider, dispatch_tool=dispatch)
+    await asyncio.wait_for(bridge.run(), timeout=5)
+
+    assert calls == [("add_item", {"quantity": 2})]
+    assert provider.tool_results
+    assert provider.tool_results[0]["result"] == {"order_number": 7}
+
+
+@pytest.mark.asyncio
+async def test_a_slow_tool_does_not_leave_the_caller_in_silence():
+    async def slow(name, args):
+        await asyncio.sleep(2)
+        return {"never": "arrives"}
+
+    seen = []
+
+    async def sink(p):
+        seen.append(p)
+
+    ws = FakeTwilioWS(
+        [start_msg()]
+        + [media_msg(quiet()) for _ in range(25)]
+        + [json.dumps({"event": "stop"})]
+    )
+    provider = MockProvider(
+        [
+            ProviderEvent(
+                kind="tool_call", tool_call_id="fc1", tool_name="quote", tool_args={}
+            )
+        ]
+    )
+    bridge = MediaBridge(
+        ws, provider, dispatch_tool=slow, tool_timeout_ms=100, on_event=sink
+    )
+    await asyncio.wait_for(bridge.run(), timeout=6)
+
+    assert any(e["type"] == "tool_slow" for e in seen)
+    assert provider.tool_results, "model was never told anything"
+    assert "error" in provider.tool_results[0]["result"]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_tool_is_reported_not_crashed():
+    async def boom(name, args):
+        raise RuntimeError("database on fire")
+
+    ws = FakeTwilioWS(
+        [start_msg()]
+        + [media_msg(quiet()) for _ in range(20)]
+        + [json.dumps({"event": "stop"})]
+    )
+    provider = MockProvider(
+        [
+            ProviderEvent(
+                kind="tool_call", tool_call_id="fc1", tool_name="quote", tool_args={}
+            )
+        ]
+    )
+    bridge = MediaBridge(ws, provider, dispatch_tool=boom)
+    await asyncio.wait_for(bridge.run(), timeout=5)
+    assert "error" in provider.tool_results[0]["result"]

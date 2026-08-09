@@ -3,6 +3,7 @@
 Proves the webhook, the stream socket, the bridge, and the monitor fan-out are
 actually wired to each other, not just individually correct.
 """
+
 import base64
 import json
 
@@ -30,7 +31,11 @@ def test_webhook_returns_bidirectional_stream_twiml():
 
 
 def test_health_reports_active_provider():
-    assert client.get("/health").json() == {"ok": True, "provider": "mock"}
+    body = client.get("/health").json()
+    assert body["provider"] == "mock"
+    # Database reachability is part of health: a service that answers calls
+    # with no menu is not healthy, whatever the process thinks.
+    assert body["database"] in ("up", "down")
 
 
 def test_stream_socket_accepts_a_call_and_closes_cleanly():
@@ -43,3 +48,35 @@ def test_stream_socket_accepts_a_call_and_closes_cleanly():
 def test_monitor_socket_accepts_subscribers():
     with client.websocket_connect("/ws/monitor/CA_mon") as ws:
         assert ws is not None
+
+
+def test_health_does_not_claim_a_provider_it_is_not_using(monkeypatch):
+    """Regression: /health reported the configured provider, not the real one.
+
+    With REALTIME_PROVIDER=gemini and no API key the service quietly runs the
+    mock. Health must say so rather than reporting gemini.
+    """
+    from app import main
+
+    monkeypatch.setattr(main.settings, "realtime_provider", "gemini")
+    monkeypatch.setattr(main.settings, "gemini_api_key", "")
+    monkeypatch.setattr(main.settings, "app_env", "dev")
+
+    body = client.get("/health").json()
+    assert body["provider"] == "mock"
+    assert body["configured"] == "gemini"
+
+
+def test_production_refuses_to_silently_fall_back(monkeypatch):
+    """Answering real calls with a mock while reporting healthy is worse than
+    a hard failure."""
+    import pytest
+
+    from app import main
+
+    monkeypatch.setattr(main.settings, "realtime_provider", "gemini")
+    monkeypatch.setattr(main.settings, "gemini_api_key", "")
+    monkeypatch.setattr(main.settings, "app_env", "prod")
+
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        main.effective_provider()

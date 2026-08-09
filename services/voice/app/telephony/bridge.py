@@ -25,6 +25,7 @@ Outbound audio is paced in 20 ms frames.
     Small frames mean interruption latency is bounded by one frame, not by the
     length of whatever blob we last wrote.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -96,6 +97,8 @@ class MediaBridge:
         tools: list[dict] | None = None,
         on_event: Callable[[dict], Awaitable[None]] | None = None,
         max_call_seconds: int = 600,
+        dispatch_tool: Callable[[str, dict], Awaitable[dict]] | None = None,
+        tool_timeout_ms: int = 1200,
     ):
         self.ws = ws
         self.provider = provider
@@ -103,6 +106,10 @@ class MediaBridge:
         self.tools = tools or []
         self.on_event = on_event
         self.max_call_seconds = max_call_seconds
+        self.dispatch_tool = dispatch_tool
+        self.tool_timeout_ms = tool_timeout_ms
+        self.tool_calls: list[dict] = []
+        self._tool_tasks: set[asyncio.Task] = set()
 
         self.stream_sid: str | None = None
         self.stats = CallStats()
@@ -253,14 +260,22 @@ class MediaBridge:
                 )
                 if ev.role == "agent":
                     self._pending_this_turn += ev.text
-                await self._emit(
-                    {"type": "transcript", "role": ev.role, "text": ev.text}
-                )
+                await self._emit({"type": "transcript", "role": ev.role, "text": ev.text})
 
             elif ev.kind == "tool_call":
                 await self._emit(
                     {"type": "tool_call", "name": ev.tool_name, "args": ev.tool_args}
                 )
+                self.tool_calls.append({"name": ev.tool_name, "args": ev.tool_args})
+                if self.dispatch_tool is not None:
+                    # Run it as its own task so a slow tool cannot stall the
+                    # audio pump. Silence is what makes an agent feel broken.
+                    # The reference is held: an unreferenced task can be
+                    # garbage collected mid-flight, which on a live call means
+                    # a tool result that silently never arrives.
+                    task = asyncio.create_task(self._run_tool(ev))
+                    self._tool_tasks.add(task)
+                    task.add_done_callback(self._tool_tasks.discard)
 
             elif ev.kind == "turn_end":
                 self._agent_speaking = False
@@ -273,6 +288,35 @@ class MediaBridge:
             elif ev.kind == "error":
                 await self._emit({"type": "error", "detail": ev.detail})
                 break
+
+    async def _run_tool(self, ev) -> None:
+        """Execute one tool call and hand the result back to the model.
+
+        Bounded by tool_timeout_ms. A tool that overruns returns a speakable
+        message rather than leaving the caller in silence, and the agent can
+        stall out loud while the real work finishes.
+        """
+        started = time.time()
+        try:
+            result = await asyncio.wait_for(
+                self.dispatch_tool(ev.tool_name, ev.tool_args),
+                timeout=self.tool_timeout_ms / 1000,
+            )
+        except TimeoutError:
+            result = {"error": "that is taking a moment, tell the caller to hold on"}
+            await self._emit({"type": "tool_slow", "name": ev.tool_name})
+        except Exception as exc:
+            result = {"error": "something went wrong on our end"}
+            await self._emit({"type": "error", "detail": str(exc)})
+
+        took = int((time.time() - started) * 1000)
+        await self._emit(
+            {"type": "tool_result", "name": ev.tool_name, "ms": took, "result": result}
+        )
+        try:
+            await self.provider.send_tool_result(ev.tool_call_id, ev.tool_name, result)
+        except Exception as exc:
+            await self._emit({"type": "error", "detail": f"tool result: {exc}"})
 
     async def _pace_outbound(self) -> None:
         """Send queued frames at wall-clock speed so `clear` can interleave."""
@@ -310,6 +354,10 @@ class MediaBridge:
             await self._phone_to_provider()
         finally:
             self._closing = True
+            # Let in-flight tools finish briefly so a confirmed order is not
+            # abandoned halfway through firing.
+            if self._tool_tasks:
+                await asyncio.wait(self._tool_tasks, timeout=2)
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)

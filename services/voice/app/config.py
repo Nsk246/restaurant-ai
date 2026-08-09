@@ -1,4 +1,5 @@
 """Settings, read once from the environment."""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -23,6 +24,8 @@ class Settings(BaseSettings):
     gemini_live_model: str = "gemini-2.0-flash-live-001"
     gemini_voice: str = "Aoede"
 
+    tool_timeout_ms: int = 1200
+    max_clarify_attempts: int = 2
     max_call_seconds: int = 600
     demo_mode: bool = True
 

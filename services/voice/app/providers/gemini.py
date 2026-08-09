@@ -6,6 +6,7 @@ to the bridge makes it stop listening after the greeting, and the call then
 dies to a keepalive timeout with no obvious cause. The loop below is why that
 does not happen.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -58,6 +59,15 @@ class GeminiLiveProvider:
     async def send_text(self, text: str) -> None:
         await self._session.send_realtime_input(text=text)
 
+    async def send_tool_result(self, call_id: str, name: str, result: dict) -> None:
+        from google.genai import types
+
+        await self._session.send_tool_response(
+            function_responses=[
+                types.FunctionResponse(id=call_id, name=name, response=result)
+            ]
+        )
+
     async def interrupt(self) -> None:
         """Gemini Live handles VAD-based interruption server side.
 
@@ -97,6 +107,7 @@ class GeminiLiveProvider:
                         for fc in getattr(tc, "function_calls", []) or []:
                             yield ProviderEvent(
                                 kind="tool_call",
+                                tool_call_id=getattr(fc, "id", "") or "",
                                 tool_name=fc.name,
                                 tool_args=dict(fc.args or {}),
                             )

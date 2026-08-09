@@ -1,4 +1,5 @@
 """Webhook tests. Signature validation is a security control, so it gets tests."""
+
 from twilio.request_validator import RequestValidator
 
 from app.telephony.twilio_webhook import connect_stream_twiml, validate_twilio_signature

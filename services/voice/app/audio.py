@@ -9,6 +9,7 @@ The lookup tables here are built at import time with numpy and are verified
 byte-for-byte against `audioop` in the test suite while it still exists, so
 we get the same output with no deprecated dependency.
 """
+
 from __future__ import annotations
 
 import numpy as np

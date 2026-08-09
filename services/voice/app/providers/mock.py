@@ -3,6 +3,7 @@
 Lets the whole bridge, including barge-in and latency accounting, be tested
 without an API key, a network, or a phone.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ class MockProvider:
     def __init__(self, script: list[ProviderEvent] | None = None):
         self.sent_audio: list[bytes] = []
         self.sent_text: list[str] = []
+        self.tool_results: list[dict] = []
         self.interrupts = 0
         self.closed = False
         self.connected = False
@@ -44,6 +46,9 @@ class MockProvider:
 
     async def send_text(self, text: str) -> None:
         self.sent_text.append(text)
+
+    async def send_tool_result(self, call_id: str, name: str, result: dict) -> None:
+        self.tool_results.append({"call_id": call_id, "name": name, "result": result})
 
     async def interrupt(self) -> None:
         self.interrupts += 1

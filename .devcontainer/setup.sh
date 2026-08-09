@@ -6,8 +6,10 @@ set -euo pipefail
 
 echo "==> installing postgres and redis"
 # The base image ships a Yarn apt source whose signing key is not present.
-# apt-get update then fails, and under set -e that kills the script before
-# anything useful happens. We do not need Yarn, so drop the source.
+# `apt-get update` then fails, and under `set -e` that kills the whole script
+# before anything useful happens. We do not need Yarn, so drop the source and
+# update only what we can. `|| true` because a single unreachable mirror must
+# not block a setup that only needs the Debian repos.
 sudo rm -f /etc/apt/sources.list.d/yarn.list /etc/apt/sources.list.d/yarn.sources
 sudo apt-get update -qq || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \

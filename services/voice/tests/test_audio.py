@@ -3,6 +3,7 @@
 audioop is gone in Python 3.13. While it still exists we use it as ground
 truth; once it's gone these tests keep passing against the frozen tables.
 """
+
 import numpy as np
 import pytest
 
@@ -10,6 +11,7 @@ from app import audio
 
 try:
     import audioop
+
     HAVE_AUDIOOP = True
 except ImportError:
     HAVE_AUDIOOP = False

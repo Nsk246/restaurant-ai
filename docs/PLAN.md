@@ -368,7 +368,7 @@ harness that records per-turn timings to `conversations`.
 Ends with: you dial a number and have a conversation. No ordering yet.
 Gate: p50 under 900ms on a real cellular call, barge-in interrupts cleanly.
 
-**M2 — Tools and ordering.**
+**M2 — Tools and ordering. Done.**
 Tool layer against the M0 schema, session state in Redis, menu snapshot
 injection, order construction, mandatory spoken readback before confirm,
 idempotent confirmation.

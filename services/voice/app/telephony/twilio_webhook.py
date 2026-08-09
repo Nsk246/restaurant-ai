@@ -3,6 +3,7 @@
 Signature validation is not optional. The stream URL is public, and without
 validation anyone who finds it can make your agent talk and burn your minutes.
 """
+
 from __future__ import annotations
 
 from twilio.request_validator import RequestValidator

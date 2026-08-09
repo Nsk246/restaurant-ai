@@ -4,6 +4,7 @@ Settings are read once and cached, so these must be set before anything
 imports `app.config`. Putting them here rather than in a test module keeps
 import order out of the tests themselves.
 """
+
 import os
 import warnings
 

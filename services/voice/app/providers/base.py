@@ -4,6 +4,7 @@ The bridge talks to this, never to a vendor SDK. Two reasons: we benchmark
 providers against each other in M1 before committing, and the kiosk in Stage 2
 reuses whichever wins without touching adapter code.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -19,6 +20,7 @@ class ProviderEvent:
     audio: bytes = b""
     text: str = ""
     role: Literal["caller", "agent", ""] = ""
+    tool_call_id: str = ""
     tool_name: str = ""
     tool_args: dict = field(default_factory=dict)
     detail: str = ""
@@ -45,6 +47,7 @@ class RealtimeProvider(Protocol):
     async def connect(self, *, instructions: str, tools: list[dict]) -> None: ...
     async def send_audio(self, pcm: bytes) -> None: ...
     async def send_text(self, text: str) -> None: ...
+    async def send_tool_result(self, call_id: str, name: str, result: dict) -> None: ...
     async def interrupt(self) -> None: ...
     def receive(self) -> AsyncIterator[ProviderEvent]: ...
     async def close(self) -> None: ...

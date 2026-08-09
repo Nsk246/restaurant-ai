@@ -107,6 +107,17 @@ builds in well under a minute. If you still have a stuck Codespace, delete it
 rather than rebuilding: half-created containers carry their broken state
 forward.
 
+**Setup fails with a Yarn GPG error.** The base image carries a Yarn apt source
+with no signing key, so `apt-get update` fails and takes the script with it.
+Fixed: setup.sh now removes that source and tolerates partial update failures.
+To unstick an existing container: `sudo rm -f /etc/apt/sources.list.d/yarn.list`
+then re-run `bash .devcontainer/setup.sh`.
+
+**Setup prompts for a sudo password.** Devcontainers give the `vscode` user
+passwordless sudo to root only; `sudo -u postgres` targets a third user and
+falls outside that rule, so it prompts for a password that was never set.
+Fixed: privileged Postgres commands now go through root via `sudo su postgres`.
+
 **Twilio 31920.** The WebSocket upgrade was rejected. Deploy to Fly and repoint.
 
 **Agent replies once then goes deaf.** The provider's receive iterator ended at
