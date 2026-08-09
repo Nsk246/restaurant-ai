@@ -12,6 +12,11 @@ os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("REALTIME_PROVIDER", "mock")
 os.environ.setdefault("PUBLIC_BASE_URL", "https://demo.test")
 os.environ.setdefault("TWILIO_VALIDATE_SIGNATURE", "false")
+# No real model calls from the test suite. The import tests would otherwise
+# hit the live API whenever a developer has a key set, which is slow, costs
+# money per run, and makes the result depend on what the model felt like
+# returning. The rules parser is deterministic and is what gets asserted.
+os.environ["GEMINI_API_KEY"] = ""
 # The app opens its own pool through its lifespan, on its own event loop.
 # Sharing one pool across loops raises InterfaceError in ways that look like
 # a database problem and are not.

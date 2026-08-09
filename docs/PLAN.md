@@ -383,6 +383,19 @@ queue.
 
 Gate: the full demo choreography runs end to end.
 
+**M3.5 — Menu management. Backend done, portal next.**
+The menu was seed SQL, so a price change was a deploy. Now: create, edit,
+deactivate, attach modifier groups, and import a pasted menu.
+
+Import is deliberately two steps. Parsing a menu is inexact, so a parse
+produces a preview to correct and only an explicit commit writes. `replace`
+deactivates the existing menu for onboarding a real restaurant over the
+sample data, and deactivates rather than deletes so past orders still
+resolve their line items.
+
+This exists because the highest-leverage demo change is seeding a prospect's
+own menu, and that needs a door which is not me writing SQL.
+
 **M4 — Reservations, hours, and questions.**
 Capacity checking, reservation creation, hours including exceptions, allergen
 and dietary answers grounded in menu tags.

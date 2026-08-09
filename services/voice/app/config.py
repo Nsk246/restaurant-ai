@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     gemini_thinking_level: str = "minimal"
     # Silence before the model treats a turn as finished. Added to every turn.
     gemini_end_of_speech_ms: int = 500
+    # A cheap text model is plenty for structuring a pasted menu.
+    gemini_import_model: str = "gemini-2.5-flash"
     gemini_voice: str = "Aoede"
 
     tool_timeout_ms: int = 1200

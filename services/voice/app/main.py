@@ -30,6 +30,7 @@ from .api import broadcast_rail
 from .api import router as api_router
 from .config import get_settings, log_config_source
 from .kitchen import InternalKDS
+from .menu_admin import router as menu_router
 from .providers.gemini import GeminiLiveProvider
 from .providers.mock import MockProvider
 from .telephony.bridge import MediaBridge
@@ -69,6 +70,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Restaurant AI Operator", lifespan=lifespan)
 app.include_router(api_router)
+app.include_router(menu_router)
 
 
 def build_sms() -> notify.SmsSender:
