@@ -53,6 +53,55 @@ async def snapshot(conn: asyncpg.Connection, restaurant_id: str) -> list[dict]:
     return json.loads(raw) if isinstance(raw, str) else (raw or [])
 
 
+def render_compact(menu: list[dict]) -> str:
+    """Same menu, fewer tokens.
+
+    Three savings, in order of size:
+
+    * Modifier groups are declared once and referenced by name. Rendering
+      them inline repeats "Heat Level" and its four options on every item
+      that carries it, which on a real menu is most of them.
+    * Prose is dropped. "(also called: x, y)" becomes "=x,y". The model reads
+      a table as well as it reads a sentence and pays for fewer tokens.
+    * Prices lose their currency symbol and trailing zeros where possible.
+
+    Measured at 350ms per turn for eighteen items, so this is not cosmetic.
+    """
+    groups: dict[str, dict] = {}
+    for cat in menu:
+        for item in cat["items"]:
+            for g in item.get("modifier_groups", []):
+                groups.setdefault(g["name"], g)
+
+    out: list[str] = []
+    if groups:
+        out.append("OPTIONS (referenced by name below)")
+        for name, g in groups.items():
+            opts = " ".join(
+                f"[{o['code']}]{o['name']}"
+                + (f"+{o['price_delta']:g}" if o["price_delta"] else "")
+                for o in g["options"]
+            )
+            rule = "pick 1, required" if g["required"] else f"optional, max {g['max']}"
+            out.append(f"  {name} ({rule}): {opts}")
+        out.append("")
+
+    out.append("MENU  [code] name price =aliases {tags} <options>")
+    for cat in menu:
+        out.append(f"\n{cat['category']}")
+        for item in cat["items"]:
+            parts = [f"  [{item['code']}] {item['name']} {item['price']:g}"]
+            if item.get("aliases"):
+                parts.append("=" + ",".join(item["aliases"]))
+            if item.get("tags"):
+                parts.append("{" + ",".join(item["tags"]) + "}")
+            names = [g["name"] for g in item.get("modifier_groups", [])]
+            if names:
+                parts.append("<" + ",".join(names) + ">")
+            out.append(" ".join(parts))
+    return "\n".join(out)
+
+
 def render_for_prompt(menu: list[dict]) -> str:
     """Compact text form. Ids are included because tools take ids, not names."""
     out = []

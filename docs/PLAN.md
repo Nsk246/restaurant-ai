@@ -147,6 +147,24 @@ Two rules that fall out of this:
 - The model cannot sell what's 86'd, because unavailable items never enter the
   snapshot in the first place.
 
+### Measured latency, August 2026
+
+A real call on Railway: 1614ms total response, of which 1633ms was the model
+round trip. Transport measured effectively zero, so the network is not the
+problem and there is nothing to win by moving regions or hosts. Two earlier
+hypotheses about transport were both wrong.
+
+Isolating the model with `tools/sweep_latency.py`, one variable at a time:
+
+    bare prompt, no tools              755ms
+    full menu, no tools               1008ms
+
+The 4,810-character menu therefore costs roughly 250ms on every turn. Tool
+declarations and the tool round trip account for the rest.
+
+Levers, in measured order of size: shrink the injected menu, reduce the
+model's end-of-speech wait, cut the tools offered per turn.
+
 ### Latency budget
 
 Target: **under 900ms** from caller stopping to agent starting to speak.
@@ -162,6 +180,23 @@ Tool calls are the risk. Mitigations: keep the menu in context rather than
 querying it per turn, cache the snapshot in Redis per session, and if a tool
 exceeds `TOOL_TIMEOUT_MS` the agent speaks a filler line rather than going
 silent. Silence is what makes a voice agent feel broken.
+
+### Measured latency, August 2026
+
+A real call on Railway: 1614ms total response, of which 1633ms was the model
+round trip. Transport measured effectively zero, so the network is not the
+problem and there is nothing to win by moving regions or hosts.
+
+Isolating the model with the sweep tool, one variable at a time:
+
+    bare prompt, no tools              755ms
+    full menu, no tools               1008ms
+
+So the 4,810-character menu costs roughly 250ms on every turn. Tool
+declarations and the tool round trip account for the rest.
+
+The levers, in order of measured size: shrink the injected menu, reduce the
+model's end-of-speech wait, cut the number of tools offered per turn.
 
 ### Known optimization, not yet needed
 

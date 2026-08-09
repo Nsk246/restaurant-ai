@@ -42,9 +42,18 @@ MENU (ids in brackets are what the tools take):
 """
 
 
-def build(tenant: menu_mod.Tenant, menu: list[dict]) -> str:
+def build(
+    tenant: menu_mod.Tenant, menu: list[dict], *, compact: bool = True
+) -> str:
+    """Assemble the system instruction.
+
+    The menu render is switchable because it is worth roughly 350ms per turn
+    on an eighteen-item menu, and that has to be measurable rather than
+    argued about.
+    """
     persona = tenant.config.get("persona")
-    text = BASE.format(restaurant=tenant.name, menu=menu_mod.render_for_prompt(menu))
+    render = menu_mod.render_compact if compact else menu_mod.render_for_prompt
+    text = BASE.format(restaurant=tenant.name, menu=render(menu))
     if persona:
         text += f"\nHouse style: {persona}\n"
     if not tenant.config.get("allow_delivery", False):

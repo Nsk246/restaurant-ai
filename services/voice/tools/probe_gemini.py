@@ -43,6 +43,37 @@ def speech_like(seconds: float = 1.0, rate: int = 16000) -> bytes:
     return (sweep * 8000).astype(np.int16).tobytes()
 
 
+async def load_real_context() -> tuple[str, list[dict]]:
+    """The actual prompt and tools a call uses.
+
+    Probing with a toy prompt measured 714ms while real calls measured 1633ms.
+    The difference is the menu and the tool declarations, so the benchmark has
+    to carry them or it is measuring the wrong thing.
+    """
+    import asyncpg
+
+    from app.agent import menu as menu_mod
+    from app.agent import prompt as prompt_mod
+    from app.agent.tools import TOOL_SCHEMAS
+
+    dsn = os.environ.get("DATABASE_URL", "")
+    if not dsn:
+        return "You answer the phone for a restaurant. Keep replies short.", []
+    try:
+        conn = await asyncpg.connect(dsn, timeout=3)
+    except Exception:
+        return "You answer the phone for a restaurant. Keep replies short.", []
+    try:
+        number = await conn.fetchval(
+            "SELECT e164 FROM phone_numbers WHERE is_active ORDER BY created_at LIMIT 1"
+        )
+        tenant = await menu_mod.resolve_tenant(conn, number)
+        snapshot = await menu_mod.snapshot(conn, tenant.id)
+        return prompt_mod.build(tenant, snapshot), list(TOOL_SCHEMAS)
+    finally:
+        await conn.close()
+
+
 async def probe(model: str, timeout: float) -> int:
     from app.providers.gemini import GeminiLiveProvider
 
@@ -53,16 +84,26 @@ async def probe(model: str, timeout: float) -> int:
     print(f"key      : {key[:6]}...{key[-4:]} ({len(key)} chars)")
     print(f"model    : {model}")
 
-    provider = GeminiLiveProvider(api_key=key, model=model)
+    silence_ms = int(os.environ.get("GEMINI_END_OF_SPEECH_MS", "500"))
+    thinking = os.environ.get("GEMINI_THINKING_LEVEL", "minimal")
+    instructions, tools = await load_real_context()
+    print(f"thinking : {thinking}")
+    print(f"endpoint : {silence_ms}ms of silence")
+    print(f"prompt   : {len(instructions)} chars (~{len(instructions) // 4} tokens)")
+    print(f"tools    : {len(tools)}")
+
+    provider = GeminiLiveProvider(
+        api_key=key,
+        model=model,
+        thinking_level=thinking,
+        end_of_speech_silence_ms=silence_ms,
+    )
 
     print("\n[1/3] opening a session...")
     started = time.time()
     try:
         await asyncio.wait_for(
-            provider.connect(
-                instructions="You are a test. Say 'hello' and nothing else.",
-                tools=[],
-            ),
+            provider.connect(instructions=instructions, tools=tools),
             timeout=timeout,
         )
     except TimeoutError:
@@ -76,8 +117,8 @@ async def probe(model: str, timeout: float) -> int:
     print(f"      connected in {time.time() - started:.2f}s")
 
     print("\n[2/3] sending audio...")
-    await provider.send_audio(speech_like(1.0))
-    await provider.send_text("Say hello now.")
+    await provider.send_audio(speech_like(0.6))
+    await provider.send_text("A caller just said: what time do you close?")
 
     print("\n[3/3] waiting for a response...")
     audio_bytes = 0

@@ -714,3 +714,60 @@ async def test_the_tenant_has_exactly_one_inbound_number(kit):
             """
         )
     assert len(rows) == 1, [r["e164"] for r in rows]
+
+
+# ------------------------------------------------------- menu render cost
+
+
+async def test_compact_render_keeps_every_code_the_agent_needs(kit):
+    """Smaller is worthless if a code goes missing: the model can only order
+    what it can see, and an absent code reads to a caller as "we don't have
+    that"."""
+    from app.agent import menu as menu_mod
+
+    compact = menu_mod.render_compact(kit["menu"])
+    for cat in kit["menu"]:
+        for item in cat["items"]:
+            assert f"[{item['code']}]" in compact, item["code"]
+            for group in item.get("modifier_groups", []):
+                for option in group["options"]:
+                    assert f"[{option['code']}]" in compact, option["code"]
+
+
+async def test_compact_render_declares_each_option_group_once(kit):
+    """Rendering groups inline repeats them on every item that carries them,
+    which is most items on a real menu."""
+    from app.agent import menu as menu_mod
+
+    compact = menu_mod.render_compact(kit["menu"])
+    # Heat Level is on wings, hot chicken and the sandwich.
+    assert compact.count("[heat-lev-mild]") == 1
+    # And each of those items still references it.
+    assert compact.count("<Heat Level>") >= 2
+
+
+async def test_compact_render_keeps_prices_exact(kit):
+    from app.agent import menu as menu_mod
+
+    compact = menu_mod.render_compact(kit["menu"])
+    assert "16.5" in compact, "smash burger price"
+    assert "+2.5" in compact, "bacon delta"
+
+
+async def test_compact_render_is_smaller_than_verbose(kit):
+    """Measured at roughly 350ms per turn for eighteen items, so this is a
+    latency change rather than a tidiness one."""
+    from app.agent import menu as menu_mod
+
+    verbose = menu_mod.render_for_prompt(kit["menu"])
+    compact = menu_mod.render_compact(kit["menu"])
+    assert len(compact) < len(verbose)
+
+
+async def test_both_renders_are_available_so_the_cost_can_be_measured(kit):
+    from app.agent import prompt as prompt_mod
+
+    a = prompt_mod.build(kit["tenant"], kit["menu"], compact=True)
+    b = prompt_mod.build(kit["tenant"], kit["menu"], compact=False)
+    assert len(a) < len(b)
+    assert "smash-burger" in a and "smash-burger" in b

@@ -227,7 +227,7 @@ async def twilio_stream(ws: WebSocket, call_id: str):
                 "from": routing.get("from"),
             },
         )
-        instructions = prompt_mod.build(tenant, snap)
+        instructions = prompt_mod.build(tenant, snap, compact=settings.menu_compact)
         tools = TOOL_SCHEMAS
         dispatcher = ToolDispatcher(
             pool,
