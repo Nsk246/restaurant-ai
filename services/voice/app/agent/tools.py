@@ -32,7 +32,10 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "What the caller said"}
+                "query": {
+                    "type": "string",
+                    "description": "The caller's own words, e.g. 'the wings'.",
+                }
             },
             "required": ["query"],
         },
@@ -46,6 +49,7 @@ TOOL_SCHEMAS: list[dict] = [
                 "order_type": {
                     "type": "string",
                     "enum": ["pickup", "delivery", "dine_in"],
+                    "description": "How the caller is taking the order.",
                 }
             },
             "required": ["order_type"],
@@ -54,19 +58,41 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "name": "add_item",
         "description": (
-            "Add one item to the order. item_code and modifier_codes are the "
-            "short codes in square brackets in the menu, like 'smash-burger'. "
-            "Never invent one."
+            "Add one item to the order, with any options the caller asked "
+            "for. Use the short codes in square brackets in the menu. Never "
+            "invent a code."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "item_code": {"type": "string"},
-                "quantity": {"type": "integer", "minimum": 1},
-                "modifier_codes": {"type": "array", "items": {"type": "string"}},
+                "item_code": {
+                    "type": "string",
+                    "description": (
+                        "The dish code from the menu, e.g. 'smash-burger'."
+                    ),
+                },
+                "quantity": {
+                    "type": "integer",
+                    "description": "How many. Defaults to 1.",
+                },
+                "modifier_codes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Option codes from that dish's own groups, e.g. "
+                        "['add-ons-bacon', 'add-ons-fried-egg'] for a burger "
+                        "with bacon and a fried egg, or ['heat-lev-hot'] for "
+                        "a heat level. Required groups must be answered here. "
+                        "Use the codes listed under the dish, never one from "
+                        "a different dish."
+                    ),
+                },
                 "note": {
                     "type": "string",
-                    "description": "Free text for the kitchen, e.g. 'no pickles'",
+                    "description": (
+                        "Anything the kitchen needs that is not an option "
+                        "code, in the caller's own words, e.g. 'no pickles'."
+                    ),
                 },
             },
             "required": ["item_code"],
@@ -78,8 +104,14 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "line_id": {"type": "string"},
-                "quantity": {"type": "integer", "minimum": 0},
+                "line_id": {
+                    "type": "string",
+                    "description": "The line_id returned by add_item.",
+                },
+                "quantity": {
+                    "type": "integer",
+                    "description": "The new quantity. Zero removes the line.",
+                },
             },
             "required": ["line_id", "quantity"],
         },
@@ -101,10 +133,25 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "customer_name": {"type": "string"},
-                "table_label": {"type": "string"},
+                "customer_name": {
+                    "type": "string",
+                    "description": "The name to put on the ticket.",
+                },
+                "table_label": {
+                    "type": "string",
+                    "description": "Table number. Required for dine-in.",
+                },
             },
         },
+    },
+    {
+        "name": "check_open",
+        "description": (
+            "Whether the restaurant is open right now, and when it next opens "
+            "or closes. Call this before promising a pickup time if you are "
+            "not sure, and whenever the caller asks about hours."
+        ),
+        "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "transfer_to_human",
@@ -114,7 +161,12 @@ TOOL_SCHEMAS: list[dict] = [
         ),
         "parameters": {
             "type": "object",
-            "properties": {"reason": {"type": "string"}},
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Why, in a few words. For the log, not the caller.",
+                }
+            },
             "required": ["reason"],
         },
     },
@@ -133,6 +185,7 @@ class ToolDispatcher:
         conversation_id: str | None = None,
         channel: str = "phone",
         kitchen: KitchenSink | None = None,
+        max_clarify_attempts: int = 2,
     ):
         self.pool = pool
         self.tenant = tenant
@@ -140,23 +193,58 @@ class ToolDispatcher:
         self.conversation_id = conversation_id
         self.channel = channel
         self.kitchen = kitchen
+        self.max_clarify_attempts = max_clarify_attempts
         self.order_id: str | None = None
         self.customer_name: str | None = None
         self.reviewed = False
         self.transfer_requested: str | None = None
+        # Consecutive things the agent could not resolve. Two is the point at
+        # which continuing to guess is worse than fetching a person.
+        self.failed_attempts = 0
 
     async def dispatch(self, name: str, args: dict[str, Any]) -> dict:
         handler = getattr(self, f"_t_{name}", None)
         if handler is None:
             return {"error": f"unknown tool {name}"}
         try:
-            return await handler(args)
+            result = await handler(args)
         except orders.OrderError as exc:
             # Expected and speakable. The agent says this to the caller.
-            return {"error": str(exc)}
+            return self._track(name, {"error": str(exc)})
         except Exception as exc:
             log.exception("tool %s failed", name)
-            return {"error": "something went wrong on our end", "detail": str(exc)}
+            return self._track(
+                name, {"error": "something went wrong on our end", "detail": str(exc)}
+            )
+        # One line per tool call. Without it, "the model said it could not do
+        # add-ons" is unfalsifiable: you cannot tell a refusal from a
+        # rejected argument, and they need opposite fixes.
+        if result.get("error"):
+            log.warning("TOOL %s%s -> %s", name, args, result["error"])
+        else:
+            log.info("TOOL %s%s -> ok", name, args)
+        return self._track(name, result)
+
+    def _track(self, name: str, result: dict) -> dict:
+        """Count consecutive dead ends and say when to stop guessing.
+
+        An agent that keeps trying after two failures sounds like it is not
+        listening, which is when people hang up. The hint is returned as data
+        so the model can escalate in its own words rather than reciting ours.
+        """
+        stuck = bool(result.get("error")) or (
+            name == "find_item" and not result.get("candidates")
+        )
+        if stuck:
+            self.failed_attempts += 1
+            if self.failed_attempts >= self.max_clarify_attempts:
+                result["hint"] = (
+                    "You have failed to help twice now. Stop guessing, "
+                    "apologise briefly, and call transfer_to_human."
+                )
+        else:
+            self.failed_attempts = 0
+        return result
 
     # ------------------------------------------------------------------ tools
 
@@ -273,6 +361,12 @@ class ToolDispatcher:
             "total": (result.get("total_cents") or 0) / 100,
             "quoted_minutes": result.get("quoted_minutes"),
         }
+
+    async def _t_check_open(self, args: dict) -> dict:
+        from . import hours
+
+        async with self.pool.acquire() as conn:
+            return await hours.status(conn, self.tenant.id, self.tenant.timezone)
 
     async def _t_transfer_to_human(self, args: dict) -> dict:
         self.transfer_requested = args.get("reason", "caller asked")

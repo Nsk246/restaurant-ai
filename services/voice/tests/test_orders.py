@@ -574,3 +574,129 @@ async def test_snapshot_exposes_no_uuids_at_all(kit):
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", blob
     )
     assert uuids == [], f"snapshot still leaks uuids: {uuids[:2]}"
+
+
+# ------------------------------------------------- when it goes off script
+
+
+async def test_two_dead_ends_prompt_escalation(kit):
+    """An agent still guessing after two failures sounds like it is not
+    listening, which is when people hang up."""
+    d = await kit["make"]()
+    first = await d.dispatch("find_item", {"query": "pad thai"})
+    assert "hint" not in first, "one miss is normal, not a crisis"
+    second = await d.dispatch("find_item", {"query": "sushi"})
+    assert "transfer_to_human" in second.get("hint", "")
+
+
+async def test_a_success_resets_the_dead_end_counter(kit):
+    """Someone who stumbles once early must not be escalated later for it."""
+    d = await kit["make"]()
+    await d.dispatch("find_item", {"query": "pad thai"})
+    await d.dispatch("find_item", {"query": "the wings"})
+    assert d.failed_attempts == 0
+    assert "hint" not in await d.dispatch("find_item", {"query": "sushi"})
+
+
+async def test_an_order_error_also_counts_as_a_dead_end(kit):
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    await d.dispatch("add_item", {"item_code": "not-a-dish"})
+    r = await d.dispatch("add_item", {"item_code": "also-not-a-dish"})
+    assert "hint" in r
+
+
+async def test_check_open_reports_status_and_the_next_change(kit):
+    d = await kit["make"]()
+    r = await d.dispatch("check_open", {})
+    assert "open" in r
+    assert r.get("closes_at") or r.get("opens_at"), r
+
+
+async def test_hours_handle_a_closed_day_and_a_late_close(kit):
+    """Monday is closed and Friday runs an hour later. Both come from rows,
+    so a holiday closure is data rather than a code change."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.agent import hours
+
+    tz = kit["tenant"].timezone
+    zone = ZoneInfo(tz)
+    async with kit["pool"].acquire() as conn:
+        monday = await hours.status(
+            conn, kit["tenant"].id, tz, datetime(2026, 8, 10, 13, 0, tzinfo=zone)
+        )
+        friday_late = await hours.status(
+            conn, kit["tenant"].id, tz, datetime(2026, 8, 14, 22, 30, tzinfo=zone)
+        )
+        tuesday_late = await hours.status(
+            conn, kit["tenant"].id, tz, datetime(2026, 8, 11, 22, 30, tzinfo=zone)
+        )
+
+    assert monday["open"] is False
+    assert friday_late["open"] is True, "Friday closes at 11pm"
+    assert tuesday_late["open"] is False, "Tuesday closes at 10pm"
+    assert monday["opens_at"], "a closed answer must say when we next open"
+
+
+async def test_every_tool_parameter_is_described(kit):
+    """A parameter with no description is one the model has to guess at, and
+    it guesses by not using it. That reads to a caller as "I can't do that"."""
+    from app.agent.tools import TOOL_SCHEMAS
+
+    undescribed = [
+        f"{t['name']}.{name}"
+        for t in TOOL_SCHEMAS
+        for name, spec in t["parameters"].get("properties", {}).items()
+        if not spec.get("description")
+    ]
+    assert undescribed == [], undescribed
+
+
+async def test_tool_schemas_stay_inside_the_supported_subset(kit):
+    """Gemini accepts a subset of JSON Schema. An unsupported key can get the
+    whole parameter dropped, which looks exactly like the model refusing."""
+    from app.agent.tools import TOOL_SCHEMAS
+
+    allowed = {
+        "type", "format", "description", "nullable", "enum",
+        "properties", "required", "items",
+    }
+    bad: list[str] = []
+
+    def walk(node, path):
+        if not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if key == "properties":
+                for name, sub in value.items():
+                    walk(sub, f"{path}.{name}")
+            elif key == "items":
+                walk(value, path + "[]")
+            elif key not in allowed and path:
+                bad.append(f"{path}: {key}")
+
+    for tool in TOOL_SCHEMAS:
+        walk(tool["parameters"], tool["name"])
+    assert bad == [], bad
+
+
+async def test_add_item_accepts_options_from_the_dish_own_groups(kit):
+    """The path a caller asking for bacon actually takes."""
+    d = await kit["make"]()
+    await d.dispatch("start_order", {"order_type": "pickup"})
+    r = await d.dispatch(
+        "add_item",
+        {
+            "item_code": item_id(kit["menu"], "Smash Burger"),
+            "quantity": 1,
+            "modifier_codes": [
+                modifier_id(kit["menu"], "Smash Burger", "Bacon"),
+                modifier_id(kit["menu"], "Smash Burger", "Fried egg"),
+            ],
+        },
+    )
+    assert "error" not in r, r
+    rev = await d.dispatch("review_order", {})
+    assert "Bacon" in rev["spoken_summary"]

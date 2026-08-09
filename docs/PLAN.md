@@ -400,20 +400,26 @@ own menu, and that needs a door which is not me writing SQL.
 Capacity checking, reservation creation, hours including exceptions, allergen
 and dietary answers grounded in menu tags.
 
-**M5 — Holding up when the caller goes off script.**
-Not a showcase of failures. This is what lets a prospect talk normally instead
-of reading from a card. Filler audio while a tool runs, so the agent never goes
-silent. Recovery when someone changes their mind mid-order. Clarification
-limits before escalating. Warm transfer to a human. Dropped call recovery,
-out-of-hours calls, and requests for things that aren't on the menu.
+**M5 — Holding up when the caller goes off script. Done.**
+Not a showcase of failures. This is what lets a prospect talk normally
+instead of reading from a card.
 
-Dead air is the one thing that makes a voice agent feel fake, and it is the
-default behaviour if nobody builds these paths. All of this is the working
-product. None of it appears on screen as an error.
+- **No dead air.** Two deadlines on every tool call. If one has not answered
+  in 450ms the agent says three or four words and waits, rather than leaving
+  silence that sounds like a dropped line. The real answer still arrives.
+- **Stops guessing.** Consecutive dead ends are counted; after two the tool
+  result carries a hint telling the model to apologise and fetch a person. A
+  success resets the counter, so stumbling once early does not haunt the call.
+- **Actually transfers.** `<Connect><Stream>` occupies the call for its whole
+  duration, so a transfer is a Twilio REST redirect performed once the media
+  stream ends. `answerOnBridge` is set, or the caller hears silence while the
+  phone is still ringing. A failed transfer is logged loudly, because it drops
+  someone who just asked for a human.
+- **Knows when it is closed.** Hours and one-off exceptions live in rows, so a
+  holiday closure is data. A closed answer always says when the restaurant
+  next opens.
 
-Gate: an unrehearsed person can order without being coached.
-
-**M6 — Demo hardening.**
+**M6 — Demo hardening.****M6 — Demo hardening.**
 Reset, demo mode, allowlists, recorded fallback, observability, an order
 accuracy eval set built from recorded calls that can be replayed against
 changes. Rehearse the runbook five times.

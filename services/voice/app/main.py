@@ -34,6 +34,7 @@ from .menu_admin import router as menu_router
 from .providers.gemini import GeminiLiveProvider
 from .providers.mock import MockProvider
 from .telephony.bridge import MediaBridge
+from .telephony.transfer import TwilioTransfer
 from .telephony.twilio_webhook import (
     connect_stream_twiml,
     public_url,
@@ -235,6 +236,7 @@ async def twilio_stream(ws: WebSocket, call_id: str):
             conversation_id=conversation_id,
             channel="phone",
             kitchen=InternalKDS(notify=_on_ticket(tenant.id, fan_out)),
+            max_clarify_attempts=settings.max_clarify_attempts,
         )
     except RuntimeError:
         # No database. The bridge still runs so audio can be exercised, but
@@ -261,6 +263,28 @@ async def twilio_stream(ws: WebSocket, call_id: str):
     summary, err = {}, None
     try:
         summary = await bridge.run()
+
+        # The agent asked for a person. Redirect the live call now that the
+        # media stream has ended, which is the only point Twilio will accept
+        # a redirect for a call it is still bridging.
+        if dispatcher is not None and dispatcher.transfer_requested:
+            transfer = TwilioTransfer(
+                settings.twilio_account_sid,
+                settings.twilio_auth_token,
+                caller_id=routing.get("to"),
+            )
+            handed_over = await transfer.to_human(
+                call_id,
+                tenant.transfer_phone if tenant else "",
+                say="Connecting you now.",
+            )
+            await fan_out({"type": "transfer", "ok": handed_over})
+            if not handed_over:
+                log.error(
+                    "transfer failed for call %s; the caller was dropped after "
+                    "asking for a person",
+                    call_id,
+                )
     except WebSocketDisconnect:
         pass
     except Exception as exc:

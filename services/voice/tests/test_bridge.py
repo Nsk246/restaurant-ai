@@ -360,3 +360,74 @@ async def test_no_greeting_means_no_nudge():
     bridge = MediaBridge(ws, provider)
     await asyncio.wait_for(bridge.run(), timeout=5)
     assert provider.sent_text == []
+
+
+@pytest.mark.asyncio
+async def test_a_slow_tool_makes_the_agent_speak_rather_than_go_quiet():
+    """Dead air is the single thing that makes a voice agent feel broken."""
+
+    async def slowish(name, args):
+        await asyncio.sleep(0.3)
+        return {"ok": True}
+
+    seen = []
+
+    async def sink(p):
+        seen.append(p)
+
+    ws = FakeTwilioWS(
+        [start_msg()] + [media_msg(quiet()) for _ in range(30)]
+        + [json.dumps({"event": "stop"})]
+    )
+    provider = MockProvider(
+        [
+            ProviderEvent(
+                kind="tool_call",
+                tool_call_id="fc1",
+                tool_name="quote",
+                tool_args={},
+            )
+        ]
+    )
+    bridge = MediaBridge(
+        ws, provider, dispatch_tool=slowish, stall_after_ms=50, on_event=sink
+    )
+    await asyncio.wait_for(bridge.run(), timeout=6)
+
+    assert any(e["type"] == "stalling" for e in seen), seen
+    assert any("taking a second" in s for s in provider.sent_text), provider.sent_text
+    # And the real answer still arrives, rather than being abandoned.
+    assert provider.tool_results[0]["result"] == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_a_fast_tool_produces_no_filler():
+    """Filling silence that is not there would make it sound hesitant."""
+
+    async def quick(name, args):
+        return {"ok": True}
+
+    seen = []
+
+    async def sink(p):
+        seen.append(p)
+
+    ws = FakeTwilioWS(
+        [start_msg()] + [media_msg(quiet()) for _ in range(20)]
+        + [json.dumps({"event": "stop"})]
+    )
+    provider = MockProvider(
+        [
+            ProviderEvent(
+                kind="tool_call",
+                tool_call_id="fc1",
+                tool_name="quote",
+                tool_args={},
+            )
+        ]
+    )
+    bridge = MediaBridge(ws, provider, dispatch_tool=quick, on_event=sink)
+    await asyncio.wait_for(bridge.run(), timeout=5)
+
+    assert not any(e["type"] == "stalling" for e in seen)
+    assert provider.sent_text == []

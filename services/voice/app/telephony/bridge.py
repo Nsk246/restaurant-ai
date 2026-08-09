@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import time
@@ -119,6 +120,7 @@ class MediaBridge:
         tool_timeout_ms: int = 1200,
         connect_timeout_s: float = 10.0,
         greeting: str | None = None,
+        stall_after_ms: int = 450,
     ):
         self.ws = ws
         self.provider = provider
@@ -133,6 +135,10 @@ class MediaBridge:
         # wait for the other and the caller hears dead air, which reads as a
         # broken line rather than a silent agent.
         self.greeting = greeting
+        # A tool slower than this gets the agent to say something. Dead air
+        # is the single thing that makes a voice agent feel broken, and a
+        # database round trip on a bad connection is easily half a second.
+        self.stall_after_ms = stall_after_ms
         self.tool_calls: list[dict] = []
         self._tool_tasks: set[asyncio.Task] = set()
 
@@ -338,19 +344,35 @@ class MediaBridge:
     async def _run_tool(self, ev) -> None:
         """Execute one tool call and hand the result back to the model.
 
-        Bounded by tool_timeout_ms. A tool that overruns returns a speakable
-        message rather than leaving the caller in silence, and the agent can
-        stall out loud while the real work finishes.
+        Two deadlines, not one. The first is short: if the tool has not
+        answered by then, the agent says something so the caller is not left
+        in silence wondering whether the line dropped. The second is the real
+        timeout, after which we give up and tell the model to offer a
+        callback rather than stalling forever.
         """
         started = time.time()
+        task = asyncio.ensure_future(self.dispatch_tool(ev.tool_name, ev.tool_args))
         try:
             result = await asyncio.wait_for(
-                self.dispatch_tool(ev.tool_name, ev.tool_args),
-                timeout=self.tool_timeout_ms / 1000,
+                asyncio.shield(task), timeout=self.stall_after_ms / 1000
             )
         except TimeoutError:
-            result = {"error": "that is taking a moment, tell the caller to hold on"}
-            await self._emit({"type": "tool_slow", "name": ev.tool_name})
+            with contextlib.suppress(Exception):
+                await self.provider.send_text(
+                    "(That is taking a second. Tell the caller you are just "
+                    "checking, in three or four words, then wait.)"
+                )
+            await self._emit({"type": "stalling", "name": ev.tool_name})
+            remaining = max(0.1, (self.tool_timeout_ms - self.stall_after_ms) / 1000)
+            try:
+                result = await asyncio.wait_for(task, timeout=remaining)
+            except TimeoutError:
+                task.cancel()
+                result = {"error": "that is taking too long, offer to call them back"}
+                await self._emit({"type": "tool_slow", "name": ev.tool_name})
+            except Exception as exc:
+                result = {"error": "something went wrong on our end"}
+                await self._emit({"type": "error", "detail": str(exc)})
         except Exception as exc:
             result = {"error": "something went wrong on our end"}
             await self._emit({"type": "error", "detail": str(exc)})
