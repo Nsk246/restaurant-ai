@@ -1,4 +1,4 @@
-import type { MenuItem, Restaurant, Ticket } from "./types";
+import type { CallRow, MenuItem, Restaurant, Ticket } from "./types";
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
@@ -9,6 +9,9 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
 export const getRestaurant = () => json<Restaurant>("/api/restaurant");
 
 export const getRail = () => json<{ tickets: Ticket[] }>("/api/rail");
+
+export const getCalls = (limit = 8) =>
+  json<{ calls: CallRow[] }>(`/api/calls?limit=${limit}`);
 
 export const getMenu = () =>
   json<{ categories: { name: string; items: MenuItem[] }[] }>("/api/menu");

@@ -28,6 +28,16 @@ pg "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='operator'\"" | grep -q 1 |
 pg "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='operator'\"" | grep -q 1 || \
   pg "createdb -O operator operator"
 
+echo "==> installing node"
+# Node is not in the base python image and the portal needs it. Installed
+# here rather than as a devcontainer feature: features are resolved at image
+# build time, which is what made the first Codespace hang on "Retrieving".
+if ! command -v npm >/dev/null 2>&1; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - >/dev/null 2>&1
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs
+fi
+node -v
+
 echo "==> installing python deps"
 pip install --quiet --upgrade pip
 pip install --quiet -r services/voice/requirements.txt
@@ -51,12 +61,17 @@ if [ ! -f .env ]; then
   sed -i 's#^REDIS_URL=.*#REDIS_URL=redis://127.0.0.1:6379/0#' .env
 fi
 
+echo "==> building the portal"
+(cd web/portal && npm install --silent && npm run build >/dev/null) \
+  || echo "portal build failed; run 'make portal' by hand"
+
 cat <<'MSG'
 
 Ready.
 
   make test     schema assertions + python tests
-  make api      voice service on :8000
+  make portal   rebuild the portal after frontend changes
+  make api      API and portal on :8000
 
 Twilio webhook target, once port 8000 is public:
   https://$CODESPACE_NAME-8000.app.github.dev/twilio/voice

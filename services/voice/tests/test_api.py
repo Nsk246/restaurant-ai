@@ -255,3 +255,12 @@ async def test_liveness_does_not_leak_across_tenants(api):
         assert all(not c["live"] for c in calls)
     finally:
         live.mark_ended(external)
+
+
+async def test_endpoints_report_a_database_outage_as_503(api, monkeypatch):
+    """Not a 500 with a RuntimeError. The portal shows an outage, not a crash."""
+    from app import db
+
+    monkeypatch.setattr(db, "_pool", None)
+    assert api["client"].get("/api/rail").status_code == 503
+    assert api["client"].get("/api/menu").status_code == 503

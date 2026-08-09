@@ -52,3 +52,15 @@ export type CallEvent = {
   order_number?: number;
   [k: string]: unknown;
 };
+
+export type CallRow = {
+  id: string;
+  call_id: string;
+  from: string | null;
+  started_at: string | null;
+  live: boolean;
+  outcome: string | null;
+  turns: number | null;
+  p50_ms: number | null;
+  p95_ms: number | null;
+};

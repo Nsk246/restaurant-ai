@@ -111,6 +111,16 @@ For frontend work, run the portal on its own with hot reload:
 
     make portal-dev     :5173, proxies /api and /ws to :8000
 
+### Tickets without a phone call
+
+    cd services/voice && python tools/seed_demo_calls.py --count 5
+
+Runs real orders through the real tool layer, so what lands is exactly what a
+call produces: the readback gate, the fired ticket, the closed conversation
+with latency numbers. Useful for rehearsing and for working on the portal.
+
+`Reset` in the top right clears it all again.
+
 ## Making a real call
 
 1. Get a key at aistudio.google.com. Native-audio Live models need a billed
@@ -176,6 +186,12 @@ Fixed: privileged Postgres commands now go through root via `sudo su postgres`.
 migration runner is newer than your database. If the schema matches
 `db/migrations`, adopt it with `bash db/migrate.sh --baseline "$DATABASE_URL"`,
 then `make test` to confirm. If unsure, `make reset` rebuilds from scratch.
+
+**`npm: not found`.** The devcontainer image is Python-only; Node is installed
+by `setup.sh`. On a container created before that change:
+`curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs`
+
+**`GET / 404` from the API.** The portal has not been built. `make portal`.
 
 **Gemini session fails to open.** Model ids churn on the developer tier. The
 error names the model it tried; check the current list at

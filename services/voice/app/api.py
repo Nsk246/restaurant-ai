@@ -34,6 +34,19 @@ async def broadcast_rail(restaurant_id: str, payload: dict) -> None:
     _rail_watchers.get(restaurant_id, set()).difference_update(dead)
 
 
+def _pool():
+    """The pool, or a readable 503.
+
+    The service boots without a database so /health can report the outage.
+    Every other endpoint should then say so plainly rather than raising a
+    RuntimeError that reaches the browser as an unexplained 500.
+    """
+    try:
+        return db.pool()
+    except RuntimeError as exc:
+        raise HTTPException(503, "database unavailable") from exc
+
+
 async def _tenant_id(conn, slug: str | None = None) -> str:
     """Single-tenant today. The lookup exists so M-anything-later is a config
     change rather than a rewrite."""
@@ -49,7 +62,7 @@ async def _tenant_id(conn, slug: str | None = None) -> str:
 
 @router.get("/restaurant")
 async def restaurant(slug: str | None = None) -> dict[str, Any]:
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         row = await conn.fetchrow(
             "SELECT id, name, slug, timezone, tax_bps FROM restaurants"
             " WHERE ($1::text IS NULL OR slug = $1) AND is_active"
@@ -75,7 +88,7 @@ async def restaurant(slug: str | None = None) -> dict[str, Any]:
 @router.get("/menu")
 async def menu(slug: str | None = None) -> dict[str, Any]:
     """Full menu including unavailable items, since the 86 toggle needs both."""
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         rid = await _tenant_id(conn, slug)
         rows = await conn.fetch(
             """
@@ -108,7 +121,7 @@ async def set_availability(code: str, available: bool, slug: str | None = None):
     """The 86 button. An item switched off here vanishes from the agent's
     menu on the next call, rather than being something the prompt must
     remember to avoid."""
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         rid = await _tenant_id(conn, slug)
         updated = await conn.fetchrow(
             "UPDATE menu_items SET is_available=$3 WHERE restaurant_id=$1"
@@ -134,7 +147,7 @@ async def set_availability(code: str, available: bool, slug: str | None = None):
 @router.get("/rail")
 async def rail(slug: str | None = None) -> dict[str, Any]:
     """Live tickets, oldest first. That order is the whole point of a rail."""
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         rid = await _tenant_id(conn, slug)
         orders = await conn.fetch(
             """
@@ -205,7 +218,7 @@ async def advance(order_id: str, to: str, slug: str | None = None):
     a double tap on a busy screen cannot corrupt the order."""
     if to not in ("preparing", "ready", "completed", "cancelled"):
         raise HTTPException(400, f"cannot move a ticket to {to!r}")
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         rid = await _tenant_id(conn, slug)
         try:
             row = await conn.fetchrow(
@@ -228,7 +241,7 @@ async def advance(order_id: str, to: str, slug: str | None = None):
 
 @router.get("/calls")
 async def calls(limit: int = 10, slug: str | None = None) -> dict[str, Any]:
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         rid = await _tenant_id(conn, slug)
         rows = await conn.fetch(
             """
@@ -270,7 +283,7 @@ async def demo_reset(slug: str | None = None):
     """
     if not get_settings().demo_mode:
         raise HTTPException(403, "reset is only available in demo mode")
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         rid = await _tenant_id(conn, slug)
         async with conn.transaction():
             await conn.execute("DELETE FROM orders WHERE restaurant_id=$1", rid)
@@ -291,7 +304,7 @@ async def demo_reset(slug: str | None = None):
 async def rail_socket(ws: WebSocket, slug: str | None = None):
     """Pushes tickets to the kitchen screen as they fire."""
     await ws.accept()
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         rid = await _tenant_id(conn, slug)
     _rail_watchers.setdefault(rid, set()).add(ws)
     try:
@@ -302,5 +315,5 @@ async def rail_socket(ws: WebSocket, slug: str | None = None):
 
 
 async def snapshot_for(restaurant_id: str) -> list[dict]:
-    async with db.pool().acquire() as conn:
+    async with _pool().acquire() as conn:
         return await menu_mod.snapshot(conn, restaurant_id)

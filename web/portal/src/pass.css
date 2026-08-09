@@ -263,6 +263,65 @@ button:focus-visible,
   color: var(--steel-500);
 }
 
+/* Idle front of house shows the last few calls rather than a blank third of
+   the screen. It is also the answer to "what happened on the last one?",
+   which is the first thing anyone asks during a demo. */
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+
+.history__row {
+  display: grid;
+  grid-template-columns: 96px 1fr auto auto;
+  gap: 16px;
+  align-items: baseline;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--steel-700);
+  font-size: 13px;
+}
+
+.history__when {
+  font-family: var(--data);
+  font-size: 11px;
+  color: var(--steel-500);
+}
+
+.history__from {
+  font-family: var(--data);
+  font-size: 12px;
+  color: var(--steel-200);
+}
+
+.history__outcome {
+  font-family: var(--data);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--steel-300);
+}
+
+.history__outcome--order_placed {
+  color: var(--service-400);
+}
+.history__outcome--transferred {
+  color: var(--lamp-400);
+}
+.history__outcome--error,
+.history__outcome--abandoned {
+  color: var(--ember-500);
+}
+
+.history__latency {
+  font-family: var(--data);
+  font-size: 11px;
+  color: var(--steel-300);
+  min-width: 64px;
+  text-align: right;
+}
+
 /* ------------------------------------------------------------- the chit */
 
 .chit {
@@ -366,10 +425,14 @@ button:focus-visible,
   display: flex;
   gap: 12px;
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 6px;
-  /* Cards size to their contents. Stretching them left a wall of empty
-     panel under two-line orders. */
-  align-items: flex-start;
+  /* Uniform card heights with the action pinned to the bottom. Letting cards
+     size to content left the buttons at six different heights, which reads
+     as accidental rather than as a rail. */
+  align-items: stretch;
+  min-height: 0;
+  flex: 1;
 }
 
 /* Read at six feet by someone with their hands full: bigger type, fewer
@@ -443,7 +506,10 @@ button:focus-visible,
 }
 
 .ticket__lines {
+  flex: 1;
   margin-bottom: 12px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .ticket__line {
@@ -490,6 +556,7 @@ button:focus-visible,
 
 .ticket__action {
   width: 100%;
+  margin-top: auto;
   background: var(--steel-600);
   border: none;
   color: var(--chit-100);

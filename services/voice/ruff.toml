@@ -13,3 +13,6 @@ known-first-party = ["app"]
 # linter would change what the agent is told.
 "app/agent/prompt.py" = ["E501"]
 "tests/*" = ["S105", "S106"]  # test credentials are not secrets
+# Fake phone numbers and plausible latencies for a demo. Nothing here is a
+# security decision, so the cryptographic-randomness rule does not apply.
+"tools/*" = ["S311"]

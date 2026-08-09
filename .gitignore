@@ -9,4 +9,3 @@ dist/
 *.egg-info/
 .DS_Store
 web/portal/dist/
-restaurant-ai.zip

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   advance,
+  getCalls,
   getMenu,
   getRail,
   getRestaurant,
@@ -8,7 +9,14 @@ import {
   resetDemo,
   setAvailability,
 } from "./api";
-import type { CallEvent, FeedEntry, MenuItem, Restaurant, Ticket } from "./types";
+import type {
+  CallEvent,
+  CallRow,
+  FeedEntry,
+  MenuItem,
+  Restaurant,
+  Ticket,
+} from "./types";
 import "./pass.css";
 
 /** A ticket older than this is late. Tuned to feel urgent without crying wolf. */
@@ -27,6 +35,15 @@ type Draft = {
   confirmed: boolean;
   number?: number;
 };
+
+/** Wall-clock time of a call, for the idle history list. */
+function clockOf(iso: string | null) {
+  if (!iso) return "\u2014";
+  return new Date(iso).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function mmss(total: number) {
   const m = Math.floor(total / 60);
@@ -53,6 +70,7 @@ export default function Pass() {
   const [live, setLive] = useState(false);
   const [latency, setLatency] = useState<number | null>(null);
   const [callSeconds, setCallSeconds] = useState(0);
+  const [history, setHistory] = useState<CallRow[]>([]);
   const now = useNow();
   const feedRef = useRef<HTMLDivElement>(null);
   const railLoadedAt = useRef(Date.now());
@@ -132,6 +150,17 @@ export default function Pass() {
   useEffect(() => {
     if (!live) return;
     const id = setInterval(() => setCallSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [live]);
+
+  // Recent calls fill the front-of-house band when nothing is on the line.
+  useEffect(() => {
+    const load = () =>
+      getCalls(8)
+        .then((r) => setHistory(r.calls))
+        .catch(() => undefined);
+    void load();
+    const id = setInterval(load, 10000);
     return () => clearInterval(id);
   }, [live]);
 
@@ -293,13 +322,35 @@ export default function Pass() {
 
       <section className="foh">
         <div className="feed">
-          <p className="section-label">Front of house</p>
+          <p className="section-label">
+            {feed.length > 0 || live ? "Front of house" : "Front of house · recent calls"}
+          </p>
           <div className="feed__scroll" ref={feedRef}>
-            {feed.length === 0 && (
-              <p className="empty">
-                Nothing on the line. The feed fills when someone calls.
-              </p>
-            )}
+            {feed.length === 0 &&
+              (history.length > 0 ? (
+                <div className="history">
+                  {history.map((c) => (
+                    <div className="history__row" key={c.id}>
+                      <span className="history__when">{clockOf(c.started_at)}</span>
+                      <span className="history__from">{c.from ?? "unknown"}</span>
+                      <span
+                        className={`history__outcome history__outcome--${
+                          c.outcome ?? "none"
+                        }`}
+                      >
+                        {(c.outcome ?? "no outcome").replace(/_/g, " ")}
+                      </span>
+                      <span className="history__latency">
+                        {c.p50_ms ? `${c.p50_ms}ms` : "\u2014"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty">
+                  Nothing on the line. The feed fills when someone calls.
+                </p>
+              ))}
             {feed.map((entry, i) =>
               entry.kind === "turn" ? (
                 <div key={i} className={`turn turn--${entry.role}`}>
