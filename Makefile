@@ -19,7 +19,7 @@ test-setup:
 	@for f in db/seed/*.sql; do psql "$(TEST_DB)" -q -v ON_ERROR_STOP=1 -f $$f; done
 test-voice: test-setup
 	@cd services/voice && TEST_DATABASE_URL="$(TEST_DB)" python -m pytest -q
-check:    ; @bash scripts/check.sh
+check:    ; @python3 scripts/check.py
 test: check test-db test-voice
 lint:     ; ruff check services/voice
 portal:   ; cd web/portal && npm install --silent && npm run build

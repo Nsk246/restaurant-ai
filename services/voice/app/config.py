@@ -9,16 +9,30 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _env_file() -> str:
+    """Absolute path to the repo-root .env, if there is one.
+
+    Not a relative ".env": that resolves against the working directory, and
+    the service is launched from services/voice, so a repo-root file was
+    silently ignored and every setting fell back to its default.
+
+    Walk the ancestors rather than indexing a fixed depth. In the container
+    the app sits at /srv/app, which has three parents, so parents[3] raises
+    IndexError at import and the process dies before it can serve anything.
+    In a container there is no .env at all and settings come from the
+    environment, which is correct: returning the last candidate simply means
+    the file does not exist.
+    """
+    here = Path(__file__).resolve()
+    for base in here.parents:
+        candidate = base / ".env"
+        if candidate.is_file():
+            return str(candidate)
+    return ".env"
+
+
 class Settings(BaseSettings):
-    # Absolute path, not ".env". A relative env_file resolves against the
-    # working directory, and the service is launched from services/voice, so
-    # a repo-root .env was silently ignored and every setting fell back to
-    # its default. The failure is invisible: the app starts fine and simply
-    # behaves as if nothing were configured.
-    model_config = SettingsConfigDict(
-        env_file=str(Path(__file__).resolve().parents[3] / ".env"),
-        extra="ignore",
-    )
+    model_config = SettingsConfigDict(env_file=_env_file(), extra="ignore")
 
     database_url: str = "postgresql://operator:operator@localhost:5432/operator"
     redis_url: str = "redis://localhost:6379/0"
@@ -53,27 +67,25 @@ class Settings(BaseSettings):
     demo_mode: bool = True
 
 
-def resolve_base_url(configured: str, env: dict[str, str]) -> str:
-    """Normalise the public hostname, falling back to the platform's own.
-
-    Split out from get_settings so it can be tested without depending on
-    whether the developer running the suite happens to have a .env.
-    """
-    url = configured
-    if not url:
-        for var in ("RAILWAY_PUBLIC_DOMAIN", "FLY_APP_NAME"):
-            value = (env.get(var) or "").strip()
-            if value:
-                url = value if "." in value else f"{value}.fly.dev"
-                break
-    return url.replace("https://", "").replace("http://", "").strip("/")
-
-
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-    settings.public_base_url = resolve_base_url(
-        settings.public_base_url, dict(os.environ)
+    if not settings.public_base_url:
+        # Platforms hand their own hostname to the process. Using it means one
+        # less value to copy by hand, and copying it wrong produces
+        # wss:///ws/twilio/... with no host: the call connects, then goes
+        # silent, with nothing in the logs to say why.
+        for var in ("RAILWAY_PUBLIC_DOMAIN", "FLY_APP_NAME"):
+            value = os.environ.get(var, "").strip()
+            if value:
+                settings.public_base_url = (
+                    value if "." in value else f"{value}.fly.dev"
+                )
+                break
+    settings.public_base_url = (
+        settings.public_base_url.replace("https://", "")
+        .replace("http://", "")
+        .strip("/")
     )
     return settings
 
