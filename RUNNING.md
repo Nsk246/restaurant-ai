@@ -20,6 +20,18 @@ restart and takes the Twilio console with it.
        TWILIO_ACCOUNT_SID=...
        TWILIO_AUTH_TOKEN=...
        REALTIME_PROVIDER=gemini
+       RESTAURANT_PHONE=+15722281712
+       RESTAURANT_TRANSFER_PHONE=+1... your mobile, for transfers
+       TWILIO_VALIDATE_SIGNATURE=true
+
+   `RESTAURANT_PHONE` is the number callers dial, and it is what resolves the
+   tenant. It lives here rather than in the seed file because a value in a
+   file gets overwritten whenever the repo is refreshed, and a wrong number
+   means every call resolves no tenant and dies.
+
+   `TWILIO_VALIDATE_SIGNATURE` must be true on a public URL. Without it
+   anyone who finds the webhook can make your agent talk and burn your model
+   quota.
 
    Leave `PUBLIC_BASE_URL` unset. Railway provides its own hostname and the
    app uses it, which is one fewer value to copy wrong.

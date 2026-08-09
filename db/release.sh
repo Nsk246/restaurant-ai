@@ -34,6 +34,22 @@ for f in db/seed/*.sql; do
   psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f "$f"
 done
 
+# The seeded phone number is a placeholder and the seed is idempotent on
+# slug, so re-running never updates it. Drive it from the environment
+# instead: a value in a file gets overwritten every time the repo is
+# refreshed, and a wrong number means calls resolve no tenant and die.
+if [ -n "${RESTAURANT_PHONE:-}" ]; then
+  echo "==> setting the inbound number to $RESTAURANT_PHONE"
+  psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -c \
+    "UPDATE phone_numbers SET e164 = '$RESTAURANT_PHONE'
+     WHERE restaurant_id = (SELECT id FROM restaurants WHERE slug='pilot')"
+fi
+if [ -n "${RESTAURANT_TRANSFER_PHONE:-}" ]; then
+  psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -c \
+    "UPDATE restaurants SET transfer_phone_e164 = '$RESTAURANT_TRANSFER_PHONE'
+     WHERE slug='pilot'"
+fi
+
 echo "==> schema assertions"
 psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f db/tests/test_schema.sql 2>&1 \
   | sed 's/^.*NOTICE:  //'

@@ -700,3 +700,17 @@ async def test_add_item_accepts_options_from_the_dish_own_groups(kit):
     assert "error" not in r, r
     rev = await d.dispatch("review_order", {})
     assert "Bacon" in rev["spoken_summary"]
+
+
+async def test_the_tenant_has_exactly_one_inbound_number(kit):
+    """The seed used to re-add its placeholder on every deploy, leaving two
+    numbers on the tenant and the portal reporting whichever was older."""
+    async with kit["pool"].acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT p.e164 FROM phone_numbers p
+            JOIN restaurants r ON r.id = p.restaurant_id
+            WHERE r.slug = 'pilot' AND p.is_active
+            """
+        )
+    assert len(rows) == 1, [r["e164"] for r in rows]

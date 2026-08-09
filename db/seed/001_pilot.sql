@@ -24,8 +24,17 @@ VALUES (
 )
 ON CONFLICT (slug) DO NOTHING;
 
+-- Only seed a number if the restaurant has none. The real number is set
+-- from RESTAURANT_PHONE at release time, and ON CONFLICT (e164) would
+-- happily re-add this placeholder alongside it on the next deploy, leaving
+-- the tenant with two numbers and the portal showing the wrong one.
 INSERT INTO phone_numbers (restaurant_id, e164, provider)
-SELECT id, '+16155550111', 'twilio' FROM restaurants WHERE slug = 'pilot'
+SELECT r.id, '+16155550111', 'twilio'
+FROM restaurants r
+WHERE r.slug = 'pilot'
+  AND NOT EXISTS (
+      SELECT 1 FROM phone_numbers p WHERE p.restaurant_id = r.id
+  )
 ON CONFLICT (e164) DO NOTHING;
 
 -- Hours: closed Monday, 11:00 to 22:00 Tue-Thu and Sun, 11:00 to 23:00 Fri-Sat.
