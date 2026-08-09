@@ -39,8 +39,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 SQL
 
 # An existing schema with no tracking table means this runner is new here.
-# Stop and say so rather than re-running 001 against a live schema, which
-# fails on the first CREATE TYPE and looks like a broken migration.
+# Stop and say so rather than trying to re-run 001 against a live schema,
+# which fails on the first CREATE TYPE and looks like a broken migration.
 if [ "$BASELINE" -eq 0 ]; then
   tracked="$(psql "$DB" -tAc "SELECT count(*) FROM schema_migrations")"
   has_schema="$(psql "$DB" -tAc \
@@ -50,9 +50,10 @@ if [ "$BASELINE" -eq 0 ]; then
     echo "This database already has a schema but no migration history." >&2
     echo "" >&2
     echo "If it is up to date with db/migrations, adopt it:" >&2
-    echo "    bash db/migrate.sh --baseline" >&2
+    echo "    bash db/migrate.sh --baseline \"\$DATABASE_URL\"" >&2
     echo "" >&2
-    echo "If you are not sure, rebuild instead:  make reset" >&2
+    echo "If you are not sure, rebuild instead:" >&2
+    echo "    make reset" >&2
     exit 1
   fi
 fi
@@ -69,6 +70,8 @@ for f in "$DIR"/migrations/*.sql; do
 
   if [ -n "$recorded" ]; then
     if [ "$recorded" != "$sum" ]; then
+      # Editing an applied migration means two databases silently diverge.
+      # Write a new migration instead.
       echo "ERROR: $name changed after it was applied." >&2
       echo "       Add a new migration rather than editing this one." >&2
       exit 1

@@ -376,7 +376,7 @@ idempotent confirmation.
 Gate: twenty scripted orders, including modifiers and mid-order changes,
 land in the database exactly right.
 
-**M3 — Portal, rail, and confirmation.**
+**M3 — Portal, rail, and confirmation. Done.**
 The Pass design built for real. Live call view, chit filling on tool calls,
 kitchen rail with timers, 86 toggle, SMS confirmation through the notification
 queue.

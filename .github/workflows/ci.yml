@@ -28,7 +28,8 @@ jobs:
 
       - name: Apply migrations and seed
         run: |
-          for f in db/migrations/*.sql db/seed/*.sql; do
+          bash db/migrate.sh "$TEST_DATABASE_URL"
+          for f in db/seed/*.sql; do
             psql -h localhost -U operator -d operator -q -v ON_ERROR_STOP=1 -f "$f"
           done
 

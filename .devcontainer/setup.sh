@@ -36,7 +36,8 @@ pip install --quiet pytest pytest-asyncio ruff
 echo "==> applying migrations and seed"
 export PGPASSWORD=operator
 DB="postgresql://operator:operator@127.0.0.1:5432/operator"
-for f in db/migrations/*.sql db/seed/*.sql; do
+bash db/migrate.sh "$DB"
+for f in db/seed/*.sql; do
   echo "    $f"
   psql "$DB" -q -v ON_ERROR_STOP=1 -f "$f"
 done

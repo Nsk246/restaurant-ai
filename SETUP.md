@@ -93,6 +93,24 @@ M1's gate is p50 under 900ms with barge-in interrupting cleanly. Talk over the
 agent mid-sentence and confirm it stops immediately rather than finishing its
 thought.
 
+## The Pass
+
+    make portal     build it once
+    make api        serve API and portal on :8000
+
+Open port 8000. Front of house is above the line, the kitchen rail below it.
+During a call the feed shows speech with tool marks inline, and the chit fills
+as each `add_item` fires rather than at the end of the call.
+
+The 86 board takes an item off the menu immediately: the next call will not be
+offered it at all, rather than being told not to mention it. Reset clears
+orders and calls and un-86s everything, but leaves the menu alone, so a
+prospect's own menu survives between demos.
+
+For frontend work, run the portal on its own with hot reload:
+
+    make portal-dev     :5173, proxies /api and /ws to :8000
+
 ## Making a real call
 
 1. Get a key at aistudio.google.com. Native-audio Live models need a billed
@@ -153,6 +171,11 @@ then re-run `bash .devcontainer/setup.sh`.
 passwordless sudo to root only; `sudo -u postgres` targets a third user and
 falls outside that rule, so it prompts for a password that was never set.
 Fixed: privileged Postgres commands now go through root via `sudo su postgres`.
+
+**"This database already has a schema but no migration history."** The
+migration runner is newer than your database. If the schema matches
+`db/migrations`, adopt it with `bash db/migrate.sh --baseline "$DATABASE_URL"`,
+then `make test` to confirm. If unsure, `make reset` rebuilds from scratch.
 
 **Gemini session fails to open.** Model ids churn on the developer tier. The
 error names the model it tried; check the current list at

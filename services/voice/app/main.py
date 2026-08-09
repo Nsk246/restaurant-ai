@@ -5,16 +5,29 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import pathlib
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Form, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-from . import db
+from . import db, notify
 from .agent import menu as menu_mod
 from .agent import prompt as prompt_mod
 from .agent import session as session_mod
 from .agent.tools import TOOL_SCHEMAS, ToolDispatcher
+from .api import broadcast_rail
+from .api import router as api_router
 from .config import get_settings
 from .kitchen import InternalKDS
 from .providers.gemini import GeminiLiveProvider
@@ -37,6 +50,17 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Restaurant AI Operator", lifespan=lifespan)
+app.include_router(api_router)
+
+
+def build_sms() -> notify.SmsSender:
+    return notify.SmsSender(
+        settings.twilio_account_sid,
+        settings.twilio_auth_token,
+        settings.twilio_from_number,
+        demo_mode=settings.demo_mode,
+        allowlist=settings.demo_sms_allowlist.split(","),
+    )
 
 # Live monitor sockets, keyed by call id. The portal subscribes here.
 _monitors: dict[str, set[WebSocket]] = {}
@@ -171,7 +195,7 @@ async def twilio_stream(ws: WebSocket, call_id: str):
             menu=snap,
             conversation_id=conversation_id,
             channel="phone",
-            kitchen=InternalKDS(notify=fan_out),
+            kitchen=InternalKDS(notify=_on_ticket(tenant.id, fan_out)),
         )
     except RuntimeError:
         # No database. The bridge still runs so audio can be exercised, but
@@ -214,6 +238,55 @@ async def twilio_stream(ws: WebSocket, call_id: str):
         await fan_out({"type": "call_ended", **summary})
 
 
+def _on_ticket(restaurant_id: str, fan_out):
+    """A fired ticket goes three places: the call view, the kitchen rail, and
+    the customer's phone. None of them may break the other two."""
+
+    async def handle(payload: dict):
+        await fan_out(payload)
+        await broadcast_rail(restaurant_id, payload)
+        if payload.get("type") != "ticket":
+            return
+        try:
+            async with db.pool().acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT o.order_number, o.total_cents, o.quoted_minutes,
+                           o.customer_id, c.phone_e164, r.name
+                    FROM orders o
+                    JOIN restaurants r ON r.id = o.restaurant_id
+                    LEFT JOIN customers c ON c.id = o.customer_id
+                    WHERE o.id = $1
+                    """,
+                    payload["order_id"],
+                )
+                if row is None or not row["phone_e164"]:
+                    return
+                queued = await notify.queue(
+                    conn,
+                    restaurant_id=restaurant_id,
+                    to_e164=row["phone_e164"],
+                    body=notify.confirmation_body(
+                        row["name"],
+                        row["order_number"],
+                        row["total_cents"] or 0,
+                        row["quoted_minutes"],
+                    ),
+                    template="order_confirmation",
+                    idempotency_key=f"order:{payload['order_id']}:confirmation",
+                    order_id=payload["order_id"],
+                    customer_id=str(row["customer_id"]) if row["customer_id"] else None,
+                )
+                if queued:
+                    await build_sms().send_pending(conn, restaurant_id)
+        except Exception as exc:
+            # A text that fails must never fail an order the kitchen is
+            # already cooking.
+            log.warning("confirmation sms not sent: %s", exc)
+
+    return handle
+
+
 def _outcome_for(dispatcher, bridge) -> str:
     if dispatcher is None:
         return "info_only"
@@ -224,6 +297,27 @@ def _outcome_for(dispatcher, bridge) -> str:
     ):
         return "order_placed"
     return "info_only"
+
+
+# Serve the built portal from the same origin as the API. One process for a
+# demo means one thing to start and no CORS surprises on a hotel network.
+#
+# Assets get a real mount; everything else falls back to index.html through a
+# plain GET route. Mounting StaticFiles at "/" would swallow the websocket
+# routes, because a mount matches on path prefix regardless of scope type.
+_portal = pathlib.Path(__file__).resolve().parents[3] / "web" / "portal" / "dist"
+if _portal.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_portal / "assets")), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{path:path}", include_in_schema=False)
+    async def portal(path: str = ""):
+        if path.startswith(("api/", "ws/", "twilio/", "health")):
+            raise HTTPException(404, "not found")
+        return FileResponse(_portal / "index.html")
+
+else:
+    log.info("portal not built; run: make portal")
 
 
 @app.websocket("/ws/monitor/{call_id}")

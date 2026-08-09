@@ -31,6 +31,10 @@ class Settings(BaseSettings):
 
     tool_timeout_ms: int = 1200
     max_clarify_attempts: int = 2
+    twilio_from_number: str = ""
+    # Comma-separated E.164 numbers. On a Twilio trial only verified numbers
+    # receive messages, so this stops a demo failing on a Twilio error.
+    demo_sms_allowlist: str = ""
     max_call_seconds: int = 600
     demo_mode: bool = True
 
