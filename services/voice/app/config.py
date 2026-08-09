@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -54,7 +55,25 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if not settings.public_base_url:
+        # Platforms hand their own hostname to the process. Using it means one
+        # less value to copy by hand, and copying it wrong produces
+        # wss:///ws/twilio/... with no host: the call connects, then goes
+        # silent, with nothing in the logs to say why.
+        for var in ("RAILWAY_PUBLIC_DOMAIN", "FLY_APP_NAME"):
+            value = os.environ.get(var, "").strip()
+            if value:
+                settings.public_base_url = (
+                    value if "." in value else f"{value}.fly.dev"
+                )
+                break
+    settings.public_base_url = (
+        settings.public_base_url.replace("https://", "")
+        .replace("http://", "")
+        .strip("/")
+    )
+    return settings
 
 
 def log_config_source() -> str:

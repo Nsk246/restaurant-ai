@@ -61,6 +61,7 @@ cannot bypass them.
 
 ## Layout
 
+    railway.json    deploy config: docker build, pre-deploy migration
     db/migrations   schema, applied in filename order
     db/seed         pilot restaurant and menu, idempotent
     db/tests        assertions that the guarantees above actually hold

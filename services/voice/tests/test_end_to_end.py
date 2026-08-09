@@ -114,3 +114,42 @@ def test_portal_lookup_returns_none_when_not_built(tmp_path, monkeypatch):
     lonely.write_text("")
     monkeypatch.setattr(main_mod, "__file__", str(lonely))
     assert main_mod._find_portal() is None
+
+
+def test_public_base_url_is_normalised(monkeypatch):
+    """A scheme or trailing slash produces wss://host//ws/... or wss:///ws/...
+    Both connect and then go silent, with nothing in the logs to say why."""
+    import importlib
+
+    from app import config
+
+    for var in ("PUBLIC_BASE_URL", "RAILWAY_PUBLIC_DOMAIN", "FLY_APP_NAME"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://abc.ngrok-free.app/")
+    importlib.reload(config)
+    assert config.get_settings().public_base_url == "abc.ngrok-free.app"
+
+
+def test_platform_hostname_is_used_when_none_is_set(monkeypatch):
+    """One less value to copy by hand, and copying it wrong is silent."""
+    import importlib
+
+    from app import config
+
+    for var in ("PUBLIC_BASE_URL", "RAILWAY_PUBLIC_DOMAIN", "FLY_APP_NAME"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "operator.up.railway.app")
+    importlib.reload(config)
+    assert config.get_settings().public_base_url == "operator.up.railway.app"
+
+
+def test_an_explicit_url_beats_the_platform_one(monkeypatch):
+    """Running against a tunnel on a deployed box must still work."""
+    import importlib
+
+    from app import config
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "me.ngrok.app")
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "operator.up.railway.app")
+    importlib.reload(config)
+    assert config.get_settings().public_base_url == "me.ngrok.app"

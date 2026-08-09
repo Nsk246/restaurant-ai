@@ -3,7 +3,41 @@
 From a cold Codespace to a working phone call. Written down because the order
 matters and a couple of the steps are not obvious.
 
-## Every session
+## Deployed (Railway)
+
+The deployed instance is the one to demo from. A tunnel URL changes on every
+restart and takes the Twilio console with it.
+
+**First time:**
+
+1. Railway, New Project, Deploy from GitHub repo, pick `restaurant-ai`.
+   It reads `railway.json` and builds from `services/voice/Dockerfile`.
+2. In the project, Add, Database, PostgreSQL. Railway sets `DATABASE_URL`
+   on the service automatically.
+3. Service, Variables, add:
+
+       GEMINI_API_KEY=...
+       TWILIO_ACCOUNT_SID=...
+       TWILIO_AUTH_TOKEN=...
+       REALTIME_PROVIDER=gemini
+
+   Leave `PUBLIC_BASE_URL` unset. Railway provides its own hostname and the
+   app uses it, which is one fewer value to copy wrong.
+4. Settings, Networking, Generate Domain.
+5. Twilio, +15722281712, Voice Configuration, Webhook POST to
+   `https://your-app.up.railway.app/twilio/voice`. This one never changes.
+
+**Every deploy after that** is a `git push`. The pre-deploy command migrates,
+seeds, and runs the schema assertions; Railway aborts the release if any of
+it fails, so a broken migration never reaches a live phone line.
+
+Check it came up:
+
+    curl -s https://your-app.up.railway.app/health
+
+Wants `{"ok":true,"provider":"gemini","database":"up"}`.
+
+## Every session (local)
 
 **1. Start the services.** Postgres and Redis do not survive a container stop.
 
