@@ -5,7 +5,11 @@
 set -euo pipefail
 
 echo "==> installing postgres and redis"
-sudo apt-get update -qq
+# The base image ships a Yarn apt source whose signing key is not present.
+# apt-get update then fails, and under set -e that kills the script before
+# anything useful happens. We do not need Yarn, so drop the source.
+sudo rm -f /etc/apt/sources.list.d/yarn.list /etc/apt/sources.list.d/yarn.sources
+sudo apt-get update -qq || true
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
   postgresql postgresql-contrib redis-server
 
@@ -13,10 +17,14 @@ echo "==> starting services"
 bash "$(dirname "$0")/start.sh"
 
 echo "==> creating role and database"
-sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='operator'" | grep -q 1 || \
-  sudo -u postgres psql -q -c "CREATE ROLE operator LOGIN PASSWORD 'operator' SUPERUSER"
-sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='operator'" | grep -q 1 || \
-  sudo -u postgres createdb -O operator operator
+# `sudo -u postgres` prompts for a password here. Devcontainers give the
+# vscode user passwordless sudo to root only, and switching to a third user
+# falls outside that rule. Going through root with `su` stays inside it.
+pg() { sudo su postgres -c "$1"; }
+pg "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='operator'\"" | grep -q 1 || \
+  pg "psql -q -c \"CREATE ROLE operator LOGIN PASSWORD 'operator' SUPERUSER\""
+pg "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='operator'\"" | grep -q 1 || \
+  pg "createdb -O operator operator"
 
 echo "==> installing python deps"
 pip install --quiet --upgrade pip
