@@ -17,6 +17,10 @@ tool layer that neither adapter owns.
 
 ## Run it
 
+Day to day, see **RUNNING.md**: cold start, tunnel, Twilio, and the things
+that have cost hours before.
+
+
     cp .env.example .env
     make up
     make migrate
