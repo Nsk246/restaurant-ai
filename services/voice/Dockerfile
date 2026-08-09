@@ -4,12 +4,21 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential && rm -rf /var/lib/apt/lists/*
 
+# psql is needed at runtime by the release command that migrates the
+# database before a new version takes traffic.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      postgresql-client && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /srv
-COPY requirements.txt .
+COPY services/voice/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN apt-get purge -y build-essential && apt-get autoremove -y
 
-COPY app ./app
+COPY services/voice/app ./app
+# Migrations, seed and assertions travel with the image so the release
+# command can run them.
+COPY db ./db
+COPY web/portal/dist ./web/portal/dist
 
 EXPOSE 8000
 # One worker on purpose. Call state lives in the process until Redis lands in

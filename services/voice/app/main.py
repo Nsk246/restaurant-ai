@@ -132,16 +132,6 @@ async def inbound_call(
     form = dict(await request.form())
     if settings.twilio_validate_signature and settings.app_env != "test":
         signed_url = public_url(request)
-        # Temporary diagnostic: the exact inputs to signature validation.
-        log.warning(
-            "TWILIO DEBUG url=%s scheme=%s netloc=%s fwd-proto=%s fwd-host=%s host=%s",
-            signed_url,
-            request.url.scheme,
-            request.url.netloc,
-            request.headers.get("x-forwarded-proto"),
-            request.headers.get("x-forwarded-host"),
-            request.headers.get("host"),
-        )
         ok = validate_twilio_signature(
             settings.twilio_auth_token,
             signed_url,
@@ -162,20 +152,7 @@ async def inbound_call(
     # see it, so stash it here.
     _dialled[call_id] = {"to": To, "from": From}
 
-    # Strip scheme and any trailing slash. A trailing slash produces
-    # wss://host//ws/twilio/... which Twilio cannot open, and the call fails
-    # with a generic application error that says nothing about the cause.
-    base = (
-        settings.public_base_url.replace("https://", "").replace("http://", "").strip("/")
-    )
-    if not base:
-        log.error("PUBLIC_BASE_URL is not set; the media stream cannot connect")
-    elif "app.github.dev" in base and "-8000" not in base:
-        log.warning(
-            "PUBLIC_BASE_URL %r looks like the Codespace editor host, not the "
-            "forwarded port. It should end -8000.app.github.dev",
-            base,
-        )
+    base = settings.public_base_url.replace("https://", "").replace("http://", "")
     ws_url = f"wss://{base}/ws/twilio/{call_id}"
     return Response(content=connect_stream_twiml(ws_url), media_type="application/xml")
 
@@ -356,8 +333,25 @@ def _outcome_for(dispatcher, bridge) -> str:
 # Assets get a real mount; everything else falls back to index.html through a
 # plain GET route. Mounting StaticFiles at "/" would swallow the websocket
 # routes, because a mount matches on path prefix regardless of scope type.
-_portal = pathlib.Path(__file__).resolve().parents[3] / "web" / "portal" / "dist"
-if _portal.is_dir():
+def _find_portal() -> pathlib.Path | None:
+    """Locate the built portal in both the source tree and the container.
+
+    In the repo it sits three levels above app/; in the image the app is at
+    /srv/app and the portal at /srv/web/portal/dist. Walk the ancestors
+    rather than indexing a fixed depth: /srv/app/main.py has only three
+    parents, so parents[3] raises IndexError and the process dies on import
+    before it can serve anything.
+    """
+    here = pathlib.Path(__file__).resolve()
+    for base in here.parents:
+        candidate = base / "web" / "portal" / "dist"
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+_portal = _find_portal()
+if _portal is not None:
     app.mount("/assets", StaticFiles(directory=str(_portal / "assets")), name="assets")
 
     @app.get("/", include_in_schema=False)
